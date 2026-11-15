@@ -6,7 +6,10 @@
  *     init: function (A) {},                // 地圖與資料就緒後呼叫一次：加入地圖圖層
  *     enter: function (A, args) {},         // 切到這個圖層：畫控制面板（A.panel）、圖例（A.legend）、說明（A.about）
  *     leave: function (A) {},               // 離開：隱藏自己的地圖圖層、停止動畫
- *     pick: ["layer-id", ...]               // 可以點選的地圖圖層 id（點了會開文資卡片）
+ *     pick: ["layer-id", ...],              // 可以點選的地圖圖層 id（點了會開文資卡片）
+ *     canPick: function (site) {},          // （選用）回傳 false 的文資不能點（例如目前沒顯示）
+ *     cardExtra: function (site) {},        // （選用）加在卡片裡的 HTML
+ *     theme: function (A) {}                // （選用）深淺色切換時重畫
  *   });
  * 網址：#<圖層 id>/<圖層自己的參數…>
  */
@@ -156,11 +159,14 @@
           var r = 9, f = map.queryRenderedFeatures([[e.point.x - r, e.point.y - r], [e.point.x + r, e.point.y + r]], { layers: ids });
           if (!f.length) return hideCard();
           var best = null, bd = 1e9;
+          if (A.current.canPick) f = f.filter(function (x) { return A.current.canPick(A.sites[x.properties.i]); });
+          if (!f.length) return hideCard();
           f.forEach(function (x) {
             var p = map.project(x.geometry.coordinates), d = Math.pow(p.x - e.point.x, 2) + Math.pow(p.y - e.point.y, 2);
             if (d < bd) { bd = d; best = x; }
           });
           var s = A.sites[best.properties.i];
+          if (A.current.canPick && !A.current.canPick(s)) return hideCard();
           showCard(s, A.current.cardExtra ? A.current.cardExtra(s) : "");
         });
         map.on("mousemove", function (e) {

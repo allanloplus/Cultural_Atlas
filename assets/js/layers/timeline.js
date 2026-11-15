@@ -301,8 +301,7 @@
       A.map.setLayoutProperty(DOTS, "visibility", "visible");
       A.map.setLayoutProperty(GLOW, "visibility", "visible");
       var m = args[0] === "listed" ? "listed" : "built";
-      if (!built) {
-        built = true;
+      {
         A.about.innerHTML =
           "<h3>臺灣是怎麼長出來的</h3>" +
           "<p>按下播放或拉動滑桿，文化資產會依年份在地圖上亮起。「創建年」看的是這些建築與遺址出現的先後；「公告日期」看的是它們什麼時候取得文化資產身分。</p>" +

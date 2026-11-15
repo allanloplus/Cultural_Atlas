@@ -21,7 +21,15 @@
 - 點任何一處會開卡片，並連回知識網站的 `<縣市>/#map/<景點 id>`。
 - 網址可直接指定狀態：`#timeline/built/1895`、`#timeline/listed/2005-11`。
 
-規劃中的圖層：它挺過了什麼（地震與颱風）、文資風險地圖、3D 文資島。
+**它挺過了什麼（歷史地震與颱風）**：用創建年與位置對照 183 個災害地震與 1884 年以來的颱風路徑，推估每處文資經歷過什麼。
+
+- 地震：可看「歷來最大推估震度」，或選一個地震，看當時已存在的文資各自的推估震度。
+- 颱風：每處文資創建以來，颱風中心從 100 公里內通過的次數。
+- 卡片上有每處文資的一句經歷摘要。
+- **全部是推估，不是官方觀測**；方法、誤差與來源寫在頁面的「資料說明」。
+- 網址：`#survived/quake/cwa111`（集集地震）、`#survived/typhoon`。
+
+規劃中的圖層：文資風險地圖、3D 文資島。
 
 ## 架構
 
@@ -34,8 +42,13 @@ assets/js/core.js           載入資料、建立地圖、圖層註冊、文資�
 assets/js/layers/           一個圖層一支檔
 assets/vendor/              MapLibre GL JS 4.7.1（放本機、固定版本）
 data/sites.json             全臺有形文資的精簡主檔（所有圖層共用）
+data/survived.json          每處文資的推估震度與颱風通過紀錄
+data/raw/                   抓一次就存檔的原始清單（災害地震、颱風中文名）
 data/layers.json            圖層清單
 tools/build_sites.py        產生 data/sites.json
+tools/fetch_quakes.py       抓氣象署災害地震列表 → data/raw/quakes.json
+tools/fetch_typhoon_names.py 抓氣象署颱風中文名 → data/raw/typhoon-names.json
+tools/build_survived.py     產生 data/survived.json
 ```
 
 ### 更新資料
@@ -55,6 +68,18 @@ python3 tools/build_sites.py
 - 公告日期錯誤的資料在腳本的 `ANNOUNCED_FIX` 修正（目前一筆：新竹市金城新村，原始資料 `0113-10-17` 是民國年未換算，改為 2024-10-17）。日期不合理又沒列在這裡的，腳本會提醒，該處不會出現在公告日期軸。
 - 座標完全相同的文資（同址，目前 42 處）排成一小圈錯開約 15 公尺。
 
+### 更新「它挺過了什麼」
+
+```bash
+python3 tools/build_survived.py
+```
+
+需要 Python 的 numpy。第一次執行會下載約 600 MB 到 `.cache/`（USGS 震度格網 33 個、NOAA 颱風路徑檔），約需數分鐘；`.cache/` 不進 repo，之後加 `--offline` 可以只用已下載的檔案。`data/sites.json` 有變動（文資增減）就要重跑，因為結果是照文資順序存的。
+
+有新的災害地震時：在 `tools/fetch_quakes.py` 的 `EXTRA` 加一筆（日期、名稱、災情），執行 `python3 tools/fetch_quakes.py` 再重跑上面的指令。`fetch_quakes.py` 與 `fetch_typhoon_names.py` 會連到氣象署網站，各只抓一頁；氣象署不建議自動擷取，所以只在需要更新時手動執行，結果存進 `data/raw/`。
+
+推估方法：規模 6.8 以上、USGS 有 ShakeMap 的地震取格網值，其餘用 Liu & Tsai（2005）衰減式，再依氣象署 2020 年震度分級換算。與氣象署 13 個地震、572 個實測 5 弱以上測站比較，衰減式平均低 1.3 級、ShakeMap 平均低 0.7 級（比較對象只有震度大的測站，偏低有一部分是取樣造成）。1900 年以前的地震不估震度。
+
 ### 新增圖層
 
 1. 在 `tools/` 寫建置腳本，輸出以文資 id 為鍵的 JSON 到 `data/`。
@@ -73,13 +98,17 @@ python3 -m http.server 8000
 
 GitHub Pages：Settings → Pages → Deploy from a branch，選 `main` 與 `/ (root)`。自訂網域寫在 `CNAME`（`cultural-atlas.123hi.org`），DNS 需要一筆 CNAME 記錄指向 `allanloplus.github.io`。開發在工作分支進行，合併到 `main` 才上線。
 
-GitHub Pages 每個網站上限 1 GB。本站不放照片與語音，目前不到 2 MB；之後加入地形與圖資時，要在建置腳本裡先簡化再輸出，並在這裡記錄用量。
+GitHub Pages 每個網站上限 1 GB。本站不放照片與語音，目前約 2.5 MB；之後加入地形與圖資時，要在建置腳本裡先簡化再輸出，並在這裡記錄用量。
 
 ## 資料來源與授權
 
 - 文化資產清單、座標、公告日期：文化部文化資產局國家文化資產網，經兩個知識網站整理。
 - 底圖：內政部國土測繪中心臺灣通用電子地圖。
 - 修法節點：全國法規資料庫〈文化資產保存法〉沿革。
+- 災害地震清單、颱風中文名稱：交通部中央氣象署（地震測報中心、颱風資料庫），依其政府網站資料開放宣告利用；1900 年以前的地震原始出處為鄭世楠、葉永田（1989）。
+- 震源參數與 ShakeMap：U.S. Geological Survey（公有領域）。
+- 颱風路徑：NOAA NCEI IBTrACS v04r01（Knapp et al. 2010；Gahtan et al. 2024, doi:10.25921/82ty-9e16）。
+- 震度衰減式：Liu, K.-S. & Tsai, Y.-B. (2005), BSSA 95(3):1045–1058。
 - 地圖程式：MapLibre GL JS，BSD 3-Clause 授權（`assets/vendor/maplibre-gl.LICENSE.txt`）。
 
 ---
