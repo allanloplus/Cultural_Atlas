@@ -1,6 +1,9 @@
 {
   "說明": "圖層清單。新增圖層：加一筆、寫一支 assets/js/layers/<id>.js（呼叫 Atlas.registerLayer）、需要的資料由 tools/ 的建置腳本輸出到 data/。on 設 false 的圖層不會載入。",
   "layers": [
-    { "id": "timeline", "title": "臺灣是怎麼長出來的", "short": "時間軸", "script": "assets/js/layers/timeline.js", "on": true }
+    { "id": "timeline", "title": "臺灣是怎麼長出來的", "short": "時間軸", "script": "assets/js/layers/timeline.js", "on": true
+    },
+    { "id": "survived", "title": "它挺過了什麼", "short": "挺過了什麼", "script": "assets/js/layers/survived.js", "on": true
+    }
   ]
 }
