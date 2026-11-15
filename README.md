@@ -14,6 +14,15 @@
 
 ## 目前的內容
 
+**3D 文資島（首頁）**：立體的臺灣地形上，3,032 處文資各是一根光柱，可以旋轉、傾斜。
+
+- 柱高分三級，只代表等級：國定古蹟最高；直轄市定、縣市定古蹟次之；其餘（歷史建築、紀念建築、聚落建築群、文化景觀、考古遺址）最低。
+- 顏色可切換：類別（預設）、年代、地震（歷來最大推估震度）、風險（災害潛勢標籤數）。換顏色時柱高不變；每種顏色附「看完整圖層」連到對應的平面分頁。地震與風險直接用下面兩個圖層的資料與算法，並保留「推估」「僅供防災參考」的標示。
+- 進站會慢慢環繞一圈，碰一下就停；系統設定「減少動態效果」時不轉。面板上有向左轉、向右轉、俯視／斜看、全島、環繞一圈的按鈕，手機不用手勢也能操作。
+- 地形高度誇大 2.5 倍，解析度約 140 公尺，只呈現大地勢。
+- 退路：顯示太慢（相鄰畫面間隔的中位數超過 250 毫秒）或無法建立地形時，自動改開 `#timeline` 並顯示提示，提示上有「仍要開啟 3D」。同一個瀏覽器分頁內會記住這個結果。
+- 網址：`#island`、`#island/era`、`#island/quake`、`#island/risk`。
+
 **臺灣是怎麼長出來的（時間軸動畫）**：3,032 處有形文化資產依年份在地圖上亮起。
 
 - 「創建年」軸：史前到今天，顏色分六個時代（1624 年以前、荷西、明鄭、清領、日治、戰後）。年代為推估的文資以空心圈表示，可在圖例關閉。
@@ -40,8 +49,6 @@
 
 目前的套疊結果（2026 年 11 月）：24 小時 350／500／650 毫米情境下淹水 0.5 公尺以上的文資 51／122／242 處；距活動斷層 500 公尺內 178 處；土石流 30 處；大規模崩塌 3 處。
 
-規劃中的圖層：3D 文資島。
-
 ## 架構
 
 純靜態網站，沒有後台與資料庫。所有資料在建置時用 Python 算好，輸出成 `data/` 的 JSON，網頁只讀取結果。
@@ -56,6 +63,7 @@ data/sites.json             全臺有形文資的精簡主檔（所有圖層共�
 data/survived.json          每處文資的推估震度與颱風通過紀錄
 data/risk.json              每處文資的災害潛勢標籤
 data/risk-lines.geojson     地圖上畫的活動斷層與土石流潛勢溪流（已簡化）
+data/terrain/               3D 文資島的地形圖磚（Terrarium 編碼的 PNG，第 5–10 級）與 meta.json
 data/raw/                   抓一次就存檔的原始清單（災害地震、颱風中文名）
 data/layers.json            圖層清單
 tools/build_sites.py        產生 data/sites.json
@@ -63,6 +71,7 @@ tools/fetch_quakes.py       抓氣象署災害地震列表 → data/raw/quakes.j
 tools/fetch_typhoon_names.py 抓氣象署颱風中文名 → data/raw/typhoon-names.json
 tools/build_survived.py     產生 data/survived.json
 tools/build_risk.py         產生 data/risk.json、data/risk-lines.geojson
+tools/build_terrain.py      產生 data/terrain/
 ```
 
 ### 更新資料
@@ -116,11 +125,33 @@ python3 tools/build_risk.py
 - 水利署另有 2022 年版的全臺淹水圖，但該網站從境外連不上，目前用的是 2018 年版。
 - 所有圖資依政府資料開放授權條款第 1 版利用，必須標示提供機關、年份與資料名稱；頁面的「資料說明」會自動列出 `meta.attribution`。
 
+### 更新「3D 文資島」的地形
+
+地形不會變，平常不需要重跑；要改解析度或範圍時才需要：
+
+```bash
+pip install numpy pillow rasterio
+```
+
+```bash
+python3 tools/build_terrain.py
+```
+
+會從 AWS 公開桶下載 Copernicus DEM GLO-30 的 19 個 1°×1° 檔到 `.cache/dem/`（約 320 MB，不進 repo；加 `--offline` 只用已下載的檔案），降到約 90 公尺後重新取樣成 Web Mercator 第 10 級圖磚（每像素約 140 公尺），再往上平均出第 5–9 級。輸出 336 張圖磚、約 6 MB。
+
+- 高度取整數公尺，用 Terrarium 編碼（高度 = R×256 + G − 32768）。海面與沒有資料的地方是 0。
+- 範圍（東經 118–122.4、北緯 21.7–26.5）內全是海的圖磚也會輸出，網頁才不會抓到 404。範圍、級數有改時，`assets/js/layers/island.js` 開頭的 `TERRAIN` 要跟著改。
+- 範圍包含金門、馬祖對岸的福建沿海，那裡的地形也會立起來。
+- 下載偶爾會中途斷線而不報錯，腳本會比對檔案大小並自動重試。
+- 文資增減不必重跑：光柱是網頁依 `data/sites.json` 即時畫的，地震與風險的顏色來自 `data/survived.json`、`data/risk.json`。
+- 光柱的粗細、三級高度、誇大倍數、環繞一圈的時間、效能門檻，都是 `island.js` 開頭的常數。
+
 ### 新增圖層
 
 1. 在 `tools/` 寫建置腳本，輸出以文資 id 為鍵的 JSON 到 `data/`。
 2. 寫 `assets/js/layers/<id>.js`，呼叫 `Atlas.registerLayer({...})`（介面說明在 `core.js` 開頭，範例見 `timeline.js`）。
-3. 在 `data/layers.json` 加一筆。圖層有兩個以上時，頂端列會自動出現切換分頁。
+3. 在 `data/layers.json` 加一筆。圖層有兩個以上時，頂端列會自動出現切換分頁；排第一個且啟用的圖層是首頁。
+4. 立體圖層在 `enter` 呼叫 `Atlas.set3D(true)`、`leave` 呼叫 `Atlas.set3D(false)`（平面圖層不開放旋轉與傾斜）。要在 3D 文資島多一種光柱顏色，在 `island.js` 的 `MODES` 加一筆即可。
 
 ## 本機預覽
 
@@ -134,7 +165,7 @@ python3 -m http.server 8000
 
 GitHub Pages：Settings → Pages → Deploy from a branch，選 `main` 與 `/ (root)`。自訂網域寫在 `CNAME`（`cultural-atlas.123hi.org`），DNS 需要一筆 CNAME 記錄指向 `allanloplus.github.io`。開發在工作分支進行，合併到 `main` 才上線。
 
-GitHub Pages 每個網站上限 1 GB。本站不放照片與語音，目前約 3.5 MB；之後加入地形與圖資時，要在建置腳本裡先簡化再輸出，並在這裡記錄用量。
+GitHub Pages 每個網站上限 1 GB。本站不放照片與語音，目前約 10.5 MB（其中地形圖磚約 7 MB）；之後加入圖資時，要在建置腳本裡先簡化再輸出，並在這裡記錄用量。
 
 ## 資料來源與授權
 
@@ -149,6 +180,10 @@ GitHub Pages 每個網站上限 1 GB。本站不放照片與語音，目前約 3
 - 土石流潛勢溪流與影響範圍、大規模崩塌潛勢區與影響範圍：農業部農村發展及水土保持署（2026，115 年版）。
 - 活動斷層：經濟部地質調查及礦業管理中心，臺灣活動斷層分布圖（2021 年修正版，2025 年 10 月修訂）。
 - 上列四項政府圖資：此開放資料依政府資料開放授權條款（Open Government Data License）進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。政府資料開放授權條款：https://data.gov.tw/license
+- 地形：Copernicus DEM GLO-30（Copernicus WorldDEM-30），依 Licence for the use of the Copernicus WorldDEM-30 利用（可重製、散布、向公眾傳播、改作；免費）。授權第 6 條要求的標示與聲明如下，頁面的地圖版權列與「資料說明」都有，請勿移除：
+  - produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved.
+  - The organisations in charge of the Copernicus programme by law or by delegation do not incur any liability for any use of the Copernicus WorldDEM-30.
+  - 本站與歐盟、歐洲太空總署、Airbus 沒有關係，也未經其認可或背書（授權要求不得讓人誤以為受官方認可）。
 - 地圖程式：MapLibre GL JS，BSD 3-Clause 授權（`assets/vendor/maplibre-gl.LICENSE.txt`）。
 
 ---

@@ -29,7 +29,7 @@
     if (mode === "fault") return [["超過 " + FAULT_FAR + " 公尺", NONE], [FAULT_NEAR + "–" + FAULT_FAR + " 公尺", "#e8742c"], [FAULT_NEAR + " 公尺內", "#b3202a"]];
     if (mode === "debris") return [["沒有", NONE], ["距潛勢溪流 " + STREAM_NEAR + " 公尺內", "#c99a5b"], ["在影響範圍內", "#7a4a1e"]];
     if (mode === "landslide") return [["沒有", NONE], ["在影響範圍內", "#b784a7"], ["在潛勢區內", "#7a2e6b"]];
-    return [["沒有標籤", NONE], ["1 項", "#f0cf45"], ["2 項", "#e8742c"], ["3 項以上", "#a51f3d"]];
+    return ["沒有標籤", "1 項", "2 項", "3 項以上"].map(function (t, k) { return [t, A.riskData.colors[k]]; });
   }
   function classOf(i) {
     var r = R.sites[i], L = labels(i);
@@ -37,6 +37,15 @@
     if (mode === "all") return Math.min(3, L.n);
     return L[mode];
   }
+  function load() {
+    loading = loading || Promise.all([
+      fetch("data/risk.json").then(function (r) { return r.json(); }),
+      fetch("data/risk-lines.geojson").then(function (r) { return r.json(); })
+    ]).then(function (d) { R = d[0]; A.map.getSource("risk-lines").setData(d[1]); });
+    return loading;
+  }
+  /* 給其他圖層（3D 文資島）用：同一份資料與同一套標籤門檻 */
+  A.riskData = { load: load, count: function (i) { return labels(i).n; }, colors: [NONE, "#f0cf45", "#e8742c", "#a51f3d"] };
   function flagged(k) { return mode === "flood" ? k >= 2 && k <= 5 : k > 0; }   /* 淹水：0.5 公尺以上才算入統計 */
 
   function cardExtra(s) {
@@ -133,11 +142,7 @@
       A.map.setLayoutProperty(DOTS, "visibility", "visible");
       if (!R) {
         A.panel.innerHTML = '<p class="tl-cap">資料載入中…</p>'; A.legend.innerHTML = "";
-        loading = loading || Promise.all([
-          fetch("data/risk.json").then(function (r) { return r.json(); }),
-          fetch("data/risk-lines.geojson").then(function (r) { return r.json(); })
-        ]).then(function (d) { R = d[0]; A.map.getSource("risk-lines").setData(d[1]); });
-        return loading.then(function () { if (A.current && A.current.id === "risk") A.current.enter(A, args); })
+        return load().then(function () { if (A.current && A.current.id === "risk") A.current.enter(A, args); })
           .catch(function () { A.panel.innerHTML = '<p class="tl-cap">資料載入失敗，請重新整理。</p>'; });
       }
       mode = MODES.some(function (m) { return m[0] === args[0]; }) ? args[0] : "all";

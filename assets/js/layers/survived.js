@@ -59,6 +59,23 @@
     return html + "</div>";
   }
 
+  /* 歷來最大推估震度：只算創建年之後、有估震度的地震 */
+  function maxLevel(s) {
+    var v = 0;
+    for (var k = 0; k < order.length; k++) { var e = V.quakes[order[k]]; if (yearOf(e) >= s.year) { var c = +e.levels.charAt(s.i); if (c > v) v = c; } }
+    return v;
+  }
+  function load() {
+    loading = loading || fetch("data/survived.json").then(function (r) { return r.json(); }).then(function (d) {
+      V = d;
+      V.quakes.forEach(function (q, k) { if (q.method !== "none") order.push(k); });
+      paint();
+    });
+    return loading;
+  }
+  /* 給其他圖層（3D 文資島）用：同一份資料、同一套算法與顏色 */
+  A.survivedData = { load: load, maxLevel: maxLevel, levelName: function (c) { return lvName(c); }, colors: LV_COLOR, none: NONE, count: function () { return order.length; } };
+
   /* ---------- 地圖 ---------- */
   function applyState() {
     var n = A.sites.length, q = evIdx >= 0 ? V.quakes[evIdx] : null, counts = {};
@@ -68,8 +85,7 @@
         var c = V.typhoons[i][2];
         v = 20; TY_BINS.forEach(function (b, k) { if (c >= b[0] && c <= b[1]) v = 20 + k; });
       } else if (!q) {             /* 全部地震：歷來最大推估震度 */
-        v = 0;
-        for (var k = 0; k < order.length; k++) { var e = V.quakes[order[k]]; if (yearOf(e) >= s.year) { var c2 = +e.levels.charAt(i); if (c2 > v) v = c2; } }
+        v = maxLevel(s);
       } else if (yearOf(q) < s.year) v = -1;                         /* 當時還沒出現 */
       else if (q.method === "none") v = km(s, q) <= OLD_KM ? 10 : 0; /* 只看震央距離 */
       else v = +q.levels.charAt(i);
@@ -192,12 +208,7 @@
       A.map.setLayoutProperty(DOTS, "visibility", "visible");
       if (!V) {
         A.panel.innerHTML = '<p class="tl-cap">資料載入中…</p>'; A.legend.innerHTML = "";
-        loading = loading || fetch("data/survived.json").then(function (r) { return r.json(); }).then(function (d) {
-          V = d;
-          V.quakes.forEach(function (q, k) { if (q.method !== "none") order.push(k); });
-          paint();
-        });
-        return loading.then(function () { if (A.current && A.current.id === "survived") A.current.enter(A, args); })
+        return load().then(function () { if (A.current && A.current.id === "survived") A.current.enter(A, args); })
           .catch(function () { A.panel.innerHTML = '<p class="tl-cap">資料載入失敗，請重新整理。</p>'; });
       }
       mode = args[0] === "typhoon" ? "typhoon" : "quake";
@@ -209,6 +220,7 @@
     leave: function () {
       A.map.setLayoutProperty(DOTS, "visibility", "none");
       if (marker) { marker.remove(); marker = null; }
+      state = [];          /* 其他圖層會改同一個 feature-state，回來時要全部重設 */
     },
     theme: function () { if (V) paint(); }
   });

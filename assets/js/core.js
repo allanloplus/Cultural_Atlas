@@ -11,6 +11,8 @@
  *     cardExtra: function (site) {},        // （選用）加在卡片裡的 HTML
  *     theme: function (A) {}                // （選用）深淺色切換時重畫
  *   });
+ * 立體圖層：enter 時呼叫 A.set3D(true)（開放旋轉與傾斜），leave 時呼叫 A.set3D(false)（關閉並把鏡頭轉正）。
+ * pick 的圖層不是點（例如立體柱）時，點選取最上面的那一個。
  * 網址：#<圖層 id>/<圖層自己的參數…>
  */
 (function () {
@@ -31,10 +33,24 @@
     panel: $("#panel"), legend: $("#legendSlot"), about: $("#aboutLayer"),
     dark: function () { return mq.matches; },
     registerLayer: function (L) { A.layers[L.id] = L; },
-    showCard: showCard, hideCard: hideCard,
+    showCard: showCard, hideCard: hideCard, set3D: set3D,
     setHash: function (s) { try { history.replaceState(null, "", "#" + s); } catch (e) { /* 略過 */ } }
   };
   var mq = window.matchMedia("(prefers-color-scheme: dark)");
+
+  /* 平面圖層不能旋轉、傾斜；立體圖層進入時打開，離開時關閉並轉正 */
+  var compass = null;
+  function set3D(on) {
+    var m = A.map;
+    if (on) {
+      m.dragRotate.enable(); m.touchPitch.enable(); m.touchZoomRotate.enableRotation(); m.keyboard.enableRotation();
+      if (!compass) { compass = new maplibregl.NavigationControl({ showZoom: false, visualizePitch: true }); m.addControl(compass, "top-right"); }
+    } else {
+      m.dragRotate.disable(); m.touchPitch.disable(); m.touchZoomRotate.disableRotation(); m.keyboard.disableRotation();
+      if (compass) { m.removeControl(compass); compass = null; }
+      if (m.getPitch() || m.getBearing()) { m.stop(); m.easeTo({ pitch: 0, bearing: 0, duration: 500 }); }
+    }
+  }
 
   function fail(msg) { var m = $("#mapMsg"); m.hidden = false; m.innerHTML = "<p>" + msg + "</p>"; }
 
@@ -83,7 +99,9 @@
     if (h[0] === "about") return;
     var L = A.layers[h[0]] || A.layers[A.defs[0].id];
     if (A.current !== L) {
+      var want = location.hash;
       if (A.current && A.current.leave) A.current.leave(A);
+      if (location.hash !== want) A.setHash(want.slice(1));      /* 離開時不讓舊圖層把網址改回去 */
       hideCard();
       A.current = L;
       Array.prototype.forEach.call(document.querySelectorAll("#layerTabs a"), function (a) {
@@ -115,7 +133,7 @@
     try {
       map = A.map = new maplibregl.Map({
         container: "map", bounds: HOME, fitBoundsOptions: { padding: 24 }, minZoom: 5, maxZoom: 18,
-        maxBounds: [[112, 18], [127, 29]], dragRotate: false, pitchWithRotate: false, attributionControl: false,
+        maxBounds: [[112, 18], [127, 29]], maxPitch: 75, attributionControl: false,
         style: {
           version: 8,
           sources: { base: { type: "raster", tiles: [BASE_TILES], tileSize: 256, maxzoom: 19 } },
@@ -128,7 +146,7 @@
     } catch (e) {
       return fail("這個瀏覽器無法顯示地圖（需要 WebGL）。請改用較新的瀏覽器，或直接到<a href='https://cultural.123hi.org/'>文資知識網站</a>瀏覽。");
     }
-    map.touchZoomRotate.disableRotation();
+    map.dragRotate.disable(); map.touchPitch.disable(); map.touchZoomRotate.disableRotation(); map.keyboard.disableRotation();
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: '底圖 &copy; <a href="https://maps.nlsc.gov.tw/" target="_blank" rel="noopener">內政部國土測繪中心</a>' }), "bottom-right");
 
@@ -143,6 +161,9 @@
     });
 
     map.on("load", function () {
+      /* 手機：版權標示預設收合（點 ⓘ 展開），不要蓋住地圖 */
+      var at = $(".maplibregl-ctrl-attrib");
+      if (at && window.innerWidth <= 720) { at.classList.remove("maplibregl-compact-show"); at.removeAttribute("open"); }
       map.addSource("sites", {
         type: "geojson",
         data: { type: "FeatureCollection", features: A.sites.map(function (s) {
@@ -156,12 +177,13 @@
         map.on("click", function (e) {
           var ids = (A.current && A.current.pick) || [];
           if (!ids.length) return;
-          var r = 9, f = map.queryRenderedFeatures([[e.point.x - r, e.point.y - r], [e.point.x + r, e.point.y + r]], { layers: ids });
+          var r = window.matchMedia("(pointer: coarse)").matches ? 16 : 9, f = map.queryRenderedFeatures([[e.point.x - r, e.point.y - r], [e.point.x + r, e.point.y + r]], { layers: ids });
           if (!f.length) return hideCard();
           var best = null, bd = 1e9;
           if (A.current.canPick) f = f.filter(function (x) { return A.current.canPick(A.sites[x.properties.i]); });
           if (!f.length) return hideCard();
-          f.forEach(function (x) {
+          f.forEach(function (x, k) {
+            if (x.geometry.type !== "Point") { if (!k) best = x; return; }   /* 立體柱：查詢結果已由近到遠排序 */
             var p = map.project(x.geometry.coordinates), d = Math.pow(p.x - e.point.x, 2) + Math.pow(p.y - e.point.y, 2);
             if (d < bd) { bd = d; best = x; }
           });
