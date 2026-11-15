@@ -167,6 +167,73 @@ def save(z, x, y, a):
     return os.path.getsize(p)
 
 
+ELEV_BANDS = [0, 20, 100, 500, 1000]     # 海拔分級（公尺）：網頁「海拔」顏色與分布圖用
+STEEP_M = 250                            # 座標周圍約 300 公尺內的高低差超過這個值：海拔不可靠
+SEA_M = 300                              # 座標離最近的陸地超過這個距離：座標可能落在海上
+COUNTY_KM = 10                           # 離同縣市最近的文資超過這個距離、而別的縣市的文資近得多：縣市或座標可能有誤
+
+
+def check_sites(big):
+    """每處文資的地面高度與座標檢查 → data/terrain/sites-elev.json、reports/coord-check.csv"""
+    import csv
+    S = json.load(open(os.path.join(ROOT, "data", "sites.json"), encoding="utf-8"))
+    F = S["meta"]["fields"]
+    rows = [dict(zip(F, r)) for r in S["sites"]]
+    lat = np.array([r["lat"] for r in rows]); lng = np.array([r["lng"] for r in rows])
+    elev = np.maximum(0, np.rint(sample(big, lng, lat))).astype(int)
+    land = big > 0.5
+    sea_px = ndimage.distance_transform_edt(~land)
+    h, w = big.shape
+    ys = np.clip(((LAT1 - lat) * PPD).astype(int), 0, h - 1); xs = np.clip(((lng - LNG0) * PPD).astype(int), 0, w - 1)
+    issues = {}
+
+    def flag(i, kind, text):
+        issues.setdefault(i, []).append((kind, text))
+
+    for i in range(len(rows)):
+        y, x = ys[i], xs[i]
+        win = big[max(0, y - 3):y + 4, max(0, x - 3):x + 4]
+        rng = float(win.max() - win.min())
+        if rng > STEEP_M:
+            flag(i, "steep", "座標周圍約 300 公尺內高低差 %d 公尺，海拔可能差很多（推估 %d 公尺）" % (rng, elev[i]))
+        d = sea_px[y, x] * 30.87 * STEP * math.cos(math.radians(lat[i]))
+        inside = BOUNDS[0] <= lng[i] <= BOUNDS[2] and BOUNDS[1] <= lat[i] <= BOUNDS[3]   # 東沙等範圍外的點不檢查
+        if inside and not land[y, x] and d > SEA_M:
+            flag(i, "sea", "座標落在水面上（海、潟湖、鹽田或魚塭），離最近的陸地約 %d 公尺" % d)
+    P = np.radians(np.c_[lat, lng]); county = np.array([r["county"] for r in rows])
+    for i in range(len(rows)):
+        dd = P - P[i]
+        km = 12742 * np.arcsin(np.sqrt(np.sin(dd[:, 0] / 2) ** 2 + np.cos(P[i, 0]) * np.cos(P[:, 0]) * np.sin(dd[:, 1] / 2) ** 2))
+        km[i] = 1e9
+        same, other = km[county == county[i]].min(), km[county != county[i]].min()
+        if same > COUNTY_KM and other < same / 3:
+            j = int(np.where(county != county[i], km, 1e9).argmin())
+            flag(i, "county", "離同縣市最近的文資 %.1f 公里，卻離%s的「%s」只有 %.1f 公里" % (same, S["counties"][rows[j]["county"]]["name"], rows[j]["name"], other))
+    mi = land[(LAT1 - 26) * PPD:(LAT1 - 21) * PPD, (120 - LNG0) * PPD:(122 - LNG0) * PPD]
+    mb = big[(LAT1 - 26) * PPD:(LAT1 - 21) * PPD, (120 - LNG0) * PPD:(122 - LNG0) * PPD][mi]
+    edges = ELEV_BANDS + [1e9]
+    out = {"note": "h：每處文資所在位置的地表高度（公尺），順序同 data/sites.json；來源是數值地表模型（含樹冠與建築），由約 90 公尺的格網內插，只是近似值。"
+                   "u：海拔不可靠或座標可疑的文資索引（明細見 reports/coord-check.csv）。land：臺灣本島陸地落在各海拔分級的比例。",
+           "bands": ELEV_BANDS,
+           "land": [round(float(((mb >= edges[k]) & (mb < edges[k + 1])).mean()), 4) for k in range(len(ELEV_BANDS))],
+           "landShare": {"over500": round(float((mb > 500).mean()), 3), "over1000": round(float((mb > 1000).mean()), 3)},
+           "u": sorted(issues), "h": elev.tolist()}
+    with open(os.path.join(OUT, "sites-elev.json"), "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+    os.makedirs(os.path.join(ROOT, "reports"), exist_ok=True)
+    kinds = {"sea": "座標在水面上", "county": "縣市或座標可能有誤", "steep": "海拔不可靠（陡坡）"}
+    with open(os.path.join(ROOT, "reports", "coord-check.csv"), "w", encoding="utf-8-sig", newline="") as f:
+        wr = csv.writer(f)
+        wr.writerow(["問題", "縣市", "名稱", "類別", "緯度", "經度", "推估海拔（公尺）", "說明", "知識網站連結"])
+        order = sorted(issues, key=lambda i: (min(["sea", "county", "steep"].index(k) for k, _ in issues[i]), rows[i]["county"], -elev[i]))
+        for i in order:
+            r, c = rows[i], S["counties"][rows[i]["county"]]
+            for k, t in issues[i]:
+                wr.writerow([kinds[k], c["name"], r["name"], S["cats"][r["cat"]]["name"], r["lat"], r["lng"], elev[i], t, c["base"] + "#map/" + r["id"]])
+    n = {k: sum(1 for v in issues.values() if any(x == k for x, _ in v)) for k in kinds}
+    print("  座標檢查：%s → reports/coord-check.csv" % "、".join("%s %d 處" % (kinds[k], n[k]) for k in kinds))
+
+
 def main():
     offline = "--offline" in sys.argv
     os.makedirs(CACHE, exist_ok=True)
@@ -206,18 +273,7 @@ def main():
                 count += 1
         print("  第 %d 級 %d 張" % (z, len(up)))
         tiles = up
-    # 每處文資的地面高度（公尺，取整數；給光束立在地形上、導覽算海拔用）與本島陸地的海拔分布
-    S = json.load(open(os.path.join(ROOT, "data", "sites.json"), encoding="utf-8"))
-    F = S["meta"]["fields"]
-    la, lo = F.index("lat"), F.index("lng")
-    lat = np.array([r[la] for r in S["sites"]]); lng = np.array([r[lo] for r in S["sites"]])
-    elev = np.maximum(0, np.rint(sample(big, lng, lat))).astype(int).tolist()
-    land = big[(LAT1 - 26) * PPD:(LAT1 - 21) * PPD, (120 - LNG0) * PPD:(122 - LNG0) * PPD]
-    land = land[land > 0.5]
-    with open(os.path.join(OUT, "sites-elev.json"), "w", encoding="utf-8") as f:
-        json.dump({"note": "每處文資所在位置的地表高度（公尺），順序同 data/sites.json。來源是數值地表模型（含樹冠與建築），由約 90 公尺的格網內插，只是近似值。",
-                   "landShare": {"over500": round(float((land > 500).mean()), 3), "over1000": round(float((land > 1000).mean()), 3)},
-                   "h": elev}, f, ensure_ascii=False, separators=(",", ":"))
+    check_sites(big)
     meta = {
         "generated": datetime.date.today().isoformat(),
         "tiles": "data/terrain/{z}/{x}/{y}.png",

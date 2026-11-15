@@ -2,10 +2,10 @@
  * 地形：data/terrain/（tools/build_terrain.py）；底圖：data/relief/（tools/build_relief.py，紙雕風格，不放文字）
  * 每處文資的地面高度：data/terrain/sites-elev.json（導覽算海拔用）
  * 畫法：遠看（縮放 9.6 級以下）是六角聚合柱，高度＝格內處數；拉近後是每處一根，高度分三級
- *       （國定古蹟最高；直轄市定、縣市定古蹟次之；其餘最低）。顏色可切換類別、年代、地震、風險。
+ *       （國定古蹟最高；直轄市定、縣市定古蹟次之；其餘最低）。顏色可切換類別、年代、海拔、地震、風險。
  *       地震、風險直接用「臺灣挺過了什麼」「臺灣文資風險地圖」的資料與算法；那兩個圖層沒啟用時，切換鈕不出現。
  * 另有「島怎麼長出來」（依創建年長出柱子的動畫）與「導覽」（由資料算出事實的 8 站巡禮）。
- * 網址：#island/<cat|era|quake|risk>
+ * 網址：#island/<cat|era|elev|quake|risk>
  * 新增一種顏色：在 MODES 加一筆；新增一站導覽：在 STOPS 加一筆。
  */
 (function () {
@@ -61,6 +61,11 @@
       cap: "顏色是創建年所在的時代，年代為推估的文資也一併顯示。",
       classes: function () { return A.eras.map(function (e) { return [e.name + (e.from ? "（" + e.from + " 年起）" : ""), e.color]; }); },
       classOf: function (s) { return s.era; } },
+    { id: "elev", name: "海拔", tag: "地形推估", data: function () { return ELEVD; },
+      cap: "顏色是文資所在位置的<b>推估</b>海拔（由地形資料在座標上取值，含樹冠與建築，只是近似）。拉動下面的拉桿，只看某個高度以上的文資。",
+      classes: function () { return ELEV_CLS.map(function (c, k) { return [c, ELEV_COL[k]]; }); },
+      classOf: function (s) { var h = elev.h[s.i], k = 0; elev.bands.forEach(function (b, j) { if (h >= b) k = j; }); return k; },
+      extra: elevLegend },
     { id: "quake", name: "地震", more: ["#survived/quake/all", "臺灣挺過了什麼"], tag: "推估，不是官方觀測", data: function () { return A.survivedData; },
       cap: "顏色是每處文資從創建到現在，在歷次災害地震中<b>推估</b>遇過的最大震度，不是官方觀測，實際震度可能高一級左右。",
       classes: function () {
@@ -76,6 +81,21 @@
       classOf: function (s) { return Math.min(3, A.riskData.count(s.i)); },
       head: function (counts) { return counts.slice(1).reduce(function (a, b) { return a + b; }, 0); }, headNote: "標題的數字是有標籤的處數。" }
   ];
+  /* 海拔：分級與網頁顏色（分級同 build_terrain.py 的 ELEV_BANDS） */
+  var ELEV_CLS = ["20 公尺以下", "20–100 公尺", "100–500 公尺", "500–1,000 公尺", "1,000 公尺以上"];
+  var ELEV_COL = ["#3b8f8a", "#8fb37a", "#e0b84a", "#d07a3a", "#8a3b2e"];
+  var ELEVD = { load: function () { return elevP; } }, level = 0, shown = [];
+  function unsure(i) { return elev.u.indexOf(i) >= 0; }
+  function elevLegend(counts) {
+    var n = A.sites.length, top = A.sites.slice().sort(function (a, b) { return elev.h[b.i] - elev.h[a.i]; }).slice(0, 10);
+    return '<div class="is-dist"><p class="sv-sm"><b>文資</b>與<b>本島陸地</b>落在各高度的比例</p>' + ELEV_CLS.map(function (c, k) {
+      var a = counts[k] / n * 100, l = elev.land[k] * 100;
+      return '<div class="is-db"><span>' + c.replace(" 公尺", "") + '</span><i style="width:' + a + '%;background:' + ELEV_COL[k] + '"></i><b>' + a.toFixed(a < 10 ? 1 : 0) + '%</b><i class="land" style="width:' + l + '%"></i><b class="land">' + l.toFixed(0) + "%</b></div>";
+    }).join("") + '<p class="sv-sm">上面一條是文資，下面淡色一條是陸地。</p></div>' +
+      '<details class="lg-counties"><summary>海拔最高的 10 處</summary><ol class="is-top">' + top.map(function (s) {
+        return '<li><button type="button" data-i="' + s.i + '">' + esc(s.name) + "</button>　約 " + fmt(elev.h[s.i]) + " 公尺" + (unsure(s.i) ? '<span class="is-q">海拔不確定</span>' : "") + "</li>";
+      }).join("") + "</ol></details>";
+  }
   function modes() { return MODES.filter(function (m) { return !m.data || m.data(); }); }
   function modeDef(id) { return MODES.filter(function (m) { return m.id === (id || mode); })[0]; }
   function loadMode(id) { var M = modeDef(id); return M.data ? M.data().load() : Promise.resolve(); }
@@ -121,13 +141,14 @@
     });
   }
   function hexData() {
-    return { type: "FeatureCollection", features: hexes.map(function (h, j) {
+    var feats = hexes.map(function (h, j) {
       var n = 0, tally = {};
-      h.s.forEach(function (i) { if (year != null && A.sites[i].year > year) return; n++; tally[ks[i]] = (tally[ks[i]] || 0) + 1; });
+      h.s.forEach(function (i) { if (!vis(A.sites[i])) return; n++; tally[ks[i]] = (tally[ks[i]] || 0) + 1; });
       var best = 0, bk = 0;
       Object.keys(tally).forEach(function (k) { if (tally[k] > best || (tally[k] === best && +k > bk)) { best = tally[k]; bk = +k; } });
-      return { type: "Feature", id: j, properties: { j: j, n: n, h: n ? 3 + 5.5 * Math.sqrt(n) : 0, col: cls[bk] ? cls[bk][1] : NONE }, geometry: { type: "Polygon", coordinates: [h.ring] } };
-    }) };
+      return n ? { type: "Feature", id: j, properties: { j: j, n: n, h: 3 + 5.5 * Math.sqrt(n), col: cls[bk] ? cls[bk][1] : NONE }, geometry: { type: "Polygon", coordinates: [h.ring] } } : null;
+    });
+    return { type: "FeatureCollection", features: feats.filter(Boolean) };   /* 格內都被篩掉的不畫，免得留下扁平的底 */
   }
 
   function paint() {
@@ -194,13 +215,20 @@
   function interrupt() { stopOrbit(); }
 
   /* ---------- 島怎麼長出來 ---------- */
-  function setYear(y) {
-    var prev = year; year = y;
-    var show = function (i, on) { BANDS.forEach(function (z) { A.map.setFeatureState({ source: PILLAR + z, id: i }, { g: on ? 1 : 0 }); }); };
+  /* 柱子是否顯示：「島怎麼長出來」的年份與「海拔」的拉桿都會篩選 */
+  function vis(s) { return (year == null || s.year <= year) && (!level || !elev || elev.h[s.i] >= level); }
+  function refreshVis() {
     A.sites.forEach(function (s, i) {
-      var was = prev == null || s.year <= prev, now = y == null || s.year <= y;
-      if (was !== now) show(i, now);
+      var now = vis(s), was = shown[i] !== false;
+      if (was !== now) { shown[i] = now; BANDS.forEach(function (z) { A.map.setFeatureState({ source: PILLAR + z, id: i }, { g: now ? 1 : 0 }); }); }
     });
+  }
+  function setYear(y) { year = y; refreshVis(); }
+  function setLevel(v) {
+    level = v; refreshVis(); A.map.getSource(HEX).setData(hexData());
+    var n = A.sites.filter(vis).length, o = document.getElementById("isLvN"), t = document.getElementById("isLvV");
+    if (t) t.textContent = fmt(v);
+    if (o) o.innerHTML = "還有 <b>" + fmt(n) + "</b> 處（" + (n / A.sites.length * 100).toFixed(1) + "%）";
   }
   function yearBox(y) {
     var box = document.getElementById("isYear");
@@ -221,7 +249,7 @@
   }
   function startGrow() {
     stopTour(); stopOrbit(); A.hideCard();
-    if (mode !== "era") { mode = "era"; A.setHash("island/era"); show(); }
+    if (mode !== "era") { mode = "era"; level = 0; A.setHash("island/era"); show(); }
     fly(homeCam());
     var t0 = performance.now() + dur(1200), last = 0, b0 = VIEW.bearing;
     grow = { raf: 0 };
@@ -322,7 +350,7 @@
       if (!tour || tour.k !== k) return;
       var d = S.prep ? S.prep() : {};
       if (!d) return goStop(k + 1);
-      if (mode !== S.mode) { mode = S.mode; A.setHash("island/" + mode); show(); }
+      if (mode !== S.mode) { mode = S.mode; A.setHash("island/" + mode); if (level) setLevel(0); show(); }
       if (!el) { el = document.createElement("div"); el.id = "isTour"; el.className = "is-tour"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "導覽"); A.map.getContainer().parentNode.appendChild(el); }
       el.innerHTML = '<p class="is-tour-k">導覽 ' + (k + 1) + "／" + list.length + (S.tag ? '　<span class="sv-tag">' + S.tag + "</span>" : "") + '</p><h3>' + esc(S.title) + "</h3><p>" + S.text(d) + "</p>" +
         '<div class="is-tour-nav"><button type="button" data-d="-1"' + (k ? "" : " disabled") + '>‹ 上一站</button><button type="button" data-d="0">結束</button>' +
@@ -374,8 +402,9 @@
     A.panel.innerHTML =
       '<div class="tl-head"><div class="seg rk-seg" role="group" aria-label="柱子顏色">' +
       list.map(function (m) { return '<button type="button" data-m="' + m.id + '" aria-pressed="' + (m.id === mode) + '">' + m.name + "</button>"; }).join("") + "</div>" +
-      '<a class="is-more" href="' + M.more[0] + '">看完整圖層：' + M.more[1] + " →</a>" +
+      (M.more ? '<a class="is-more" href="' + M.more[0] + '">看完整圖層：' + M.more[1] + " →</a>" : "") +
       (M.tag ? '<span class="sv-tag">' + M.tag + "</span>" : "") + "</div>" +
+      (mode === "elev" ? '<div class="is-lv"><label for="isLv">只看海拔 <b id="isLvV">' + fmt(level) + '</b> 公尺以上</label><input type="range" id="isLv" min="0" max="2400" step="50" value="' + level + '"><span id="isLvN"></span></div>' : "") +
       '<div class="is-acts"><button type="button" class="is-main" id="isGrow" aria-pressed="' + !!grow + '">' + (grow ? "■ 停止播放" : "▶ 島怎麼長出來") + "</button>" +
       '<button type="button" class="is-main" id="isTourBtn" aria-pressed="' + !!tour + '">導覽 ' + STOPS.length + " 站</button>" +
       '<span class="is-cam" role="group" aria-label="鏡頭">' +
@@ -389,6 +418,8 @@
     Array.prototype.forEach.call(A.panel.querySelectorAll(".seg button"), function (b) {
       b.onclick = function () { stopGrow(); location.hash = "#island/" + b.dataset.m; };
     });
+    var lv = document.getElementById("isLv");
+    if (lv) { lv.oninput = function () { stopGrow(); setLevel(+lv.value); }; setLevel(level); }
     document.getElementById("isSpin").onclick = function () { if (orbit) stopOrbit(); else { stopGrow(); stopTour(); startOrbit(); } };
     document.getElementById("isGrow").onclick = function () { if (grow) stopGrow(); else startGrow(); };
     document.getElementById("isTourBtn").onclick = function () { if (tour) stopTour(); else startTour(); };
@@ -407,10 +438,22 @@
     if (M.head) order = order.slice(1).reverse().concat([0]);
     A.legend.innerHTML = '<details class="legend"' + (window.innerWidth > 720 ? " open" : "") + "><summary><span>" + M.name + "</span><b>" + fmt(head) + '</b></summary><div class="legend-body">' +
       order.map(function (k) { return '<div class="lg-row' + (counts[k] ? "" : " off") + '"><i style="--c:' + cls[k][1] + '"></i><span>' + esc(cls[k][0]) + '</span><span class="n">' + fmt(counts[k]) + "</span></div>"; }).join("") +
-      (M.headNote ? '<p class="sv-sm">' + M.headNote + "</p>" : "") +
+      (M.headNote ? '<p class="sv-sm">' + M.headNote + "</p>" : "") + (M.extra ? M.extra(counts) : "") +
       '<p class="sv-sm">六角柱的顏色是格內最多的那一類。</p>' +
       '<div class="is-tiers"><span>柱高</span>' + [2, 1, 0].map(function (t) { return '<div><i style="height:' + (6 + t * 7) + 'px"></i><span>' + ["其餘", "市縣定", "國定"][t] + "</span></div>"; }).join("") + "</div>" +
       "</div></details>";
+    Array.prototype.forEach.call(A.legend.querySelectorAll(".is-top button"), function (b) {
+      b.onclick = function () {
+        var s = A.sites[+b.dataset.i]; stopOrbit(); stopTour();
+        if (level > elev.h[s.i]) setLevel(0);
+        fly({ center: [s.lng, s.lat], zoom: 13, pitch: 62 });
+        A.showCard(s, cardExtra(s));
+      };
+    });
+  }
+  function cardExtra(s) {
+    if (!elev) return "";
+    return '<p class="sv-sm">所在位置海拔約 ' + fmt(elev.h[s.i]) + " 公尺（由地形資料推估" + (unsure(s.i) ? "；座標附近地勢陡，誤差可能很大" : "") + "）。</p>";
   }
   function about() {
     A.about.innerHTML =
@@ -420,7 +463,8 @@
       "<li><b>六角柱</b>：把臺灣切成寬約 6 公里的六角格，高度是格內的處數（取平方根，避免市區的柱子高到看不見其他地方），顏色是格內最多的那一類。</li>" +
       "<li><b>單根柱子的高度只代表等級</b>，分三級：國定古蹟最高；直轄市定、縣市定古蹟次之；" + TIER_NAME[0] + "最低。與建築的實際高度、年代、價值高低都無關。</li>" +
       "<li><b>地形高度誇大 " + EXAGGERATION + " 倍</b>，解析度約 140 公尺，只用來呈現大地勢。底圖是本站依地形算出的分層設色與山影，不含道路與地名；拉近看街道請到其他分頁。範圍以外的陸地只留淡淡的海岸線。</li>" +
-      "<li><b>導覽裡的海拔</b>是由數值地表模型（含樹冠與建築）在文資座標上取的值，只是近似；座標本身若有誤差，海拔也會跟著錯。</li>" +
+      "<li><b>「海拔」的顏色、拉桿、排行與卡片上的海拔</b>都是由數值地表模型（含樹冠與建築）在文資座標上取的值，解析度約 90 公尺，只是近似。座標附近地勢陡峭的 " + (elev ? elev.u.length : "數十") + " 處標為「海拔不確定」：座標差幾十公尺，海拔就可能差上百公尺。陸地的比例只算臺灣本島。</li>" +
+      "<li><b>導覽裡的海拔</b>同樣是由數值地表模型（含樹冠與建築）在文資座標上取的值，只是近似；座標本身若有誤差，海拔也會跟著錯。</li>" +
       "<li><b>「島怎麼長出來」</b>依知識網站整理的創建年排序；年代為推估的文資也一併出現，早期的年份誤差可能很大。創建年之後建築可能經過重建。</li>" +
       "<li><b>「地震」的顏色是推估</b>：依創建年與位置對照歷次災害地震，估算遇過的最大震度，不是官方觀測。方法與誤差見「臺灣挺過了什麼」分頁的資料說明。</li>" +
       "<li><b>「風險」的顏色是圖資套疊的結果，僅供防災參考</b>，不是個別建築的風險評估。淹水潛勢圖依《水災潛勢資料公開辦法》僅供防救災使用，不得作為土地使用管制或開發限制的依據。門檻與限制見「臺灣文資風險地圖」分頁的資料說明。</li>" +
@@ -439,6 +483,7 @@
   A.registerLayer({
     id: "island",
     pick: pillarIds(),
+    cardExtra: function (s) { return cardExtra(s); },
     init: function () {
       var base = location.href.replace(/[#?].*$/, "").replace(/[^\/]*$/, "");
       elevP = fetch("data/terrain/sites-elev.json").then(function (r) { return r.json(); }).then(function (d) { elev = d; });
@@ -478,7 +523,7 @@
       if (!active && !explicit && ss(SLOW_KEY) && !ss(FORCE_KEY) && A.layers.timeline) return fallback("先前量到這台裝置顯示 3D 地形比較吃力，");
       var m = MODES.filter(function (x) { return x.id === args[0]; })[0];
       var want = m && (!m.data || m.data()) ? m.id : "cat";
-      if (want !== mode) stopGrow();
+      if (want !== mode) { stopGrow(); if (level) { level = 0; refreshVis(); } }
       mode = want;
       if (!active) {
         active = true;
@@ -505,9 +550,9 @@
       }
       A.hideCard();
       var M = modeDef();
-      if (M.data) {
+      if (M.data || !elev) {
         A.panel.innerHTML = '<p class="tl-cap">資料載入中…</p>';
-        return M.data().load().then(function () { if (active && mode === M.id) show(); })
+        return Promise.all([M.data ? M.data().load() : null, elevP]).then(function () { if (active && mode === M.id) show(); })
           .catch(function () { A.panel.innerHTML = '<p class="tl-cap">資料載入失敗，請重新整理。</p>'; });
       }
       show();
@@ -515,6 +560,7 @@
     leave: function () {
       active = false;
       stopOrbit(); stopGrow(); stopTour(); showLabels(false);
+      if (level) { level = 0; refreshVis(); }
       ownLayers().forEach(function (id) { A.map.setLayoutProperty(id, "visibility", "none"); });
       A.map.setLayoutProperty("base", "visibility", "visible");
       A.map.setPaintProperty("bg", "background-color", A.dark() ? "#17130f" : "#efe7d8");
