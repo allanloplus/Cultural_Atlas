@@ -74,7 +74,7 @@
     return loading;
   }
   /* 給其他圖層（3D 文資島）用：同一份資料、同一套算法與顏色 */
-  A.survivedData = { load: load, maxLevel: maxLevel, levelName: function (c) { return lvName(c); }, colors: LV_COLOR, none: NONE, count: function () { return order.length; } };
+  A.survivedData = { load: load, maxLevel: maxLevel, levelName: function (c) { return lvName(c); }, colors: LV_COLOR, none: NONE, count: function () { return order.length; }, raw: function () { return V; } };
 
   /* ---------- 地圖 ---------- */
   function applyState() {

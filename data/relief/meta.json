@@ -1,0 +1,23 @@
+{
+ "themes": {
+  "light": {
+   "bytes": 1317964,
+   "count": 1142,
+   "background": "#c4d5d6"
+  },
+  "dark": {
+   "bytes": 975110,
+   "count": 1142,
+   "background": "#0f151b"
+  }
+ },
+ "minzoom": 5,
+ "maxzoom": 11,
+ "bounds": [
+  118.0,
+  21.7,
+  122.4,
+  26.5
+ ],
+ "tiles": "data/relief/{theme}/{z}/{x}/{y}.webp"
+}

@@ -11,7 +11,8 @@
       高度取整數公尺，用 Terrarium 編碼（高度 = R×256 + G − 32768，B 固定為 0）存成 PNG。
       海面與沒有資料的地方是 0。範圍內全是海的圖磚也會輸出（很小），網頁才不會抓到 404。
 
-用法：pip install numpy pillow rasterio
+      不屬於本站範圍的陸地（福建沿海）壓平成海面高度，只有臺灣、澎湖、金門、馬祖等有地形。
+用法：pip install numpy pillow rasterio scipy
       python3 tools/build_terrain.py            （加 --offline 只用已下載的檔案）
 """
 import datetime
@@ -27,6 +28,7 @@ import urllib.request
 import numpy as np
 import rasterio
 from PIL import Image
+from scipy import ndimage
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE = os.path.join(ROOT, ".cache", "dem")
@@ -96,6 +98,35 @@ def mosaic(offline):
     return big
 
 
+def ours_mask(land):
+    """哪些陸地屬於本站範圍：有文資的島，或東經 119.2 度以東、北緯 25.4 度以南、不連到圖框邊的陸地。"""
+    lab, n = ndimage.label(land)
+    keep = np.zeros(n + 1, dtype=bool)
+    edge = set(np.unique(np.concatenate([lab[0], lab[:, 0]]))) - {0}
+    rows, cols = np.nonzero(lab)
+    labs = lab[rows, cols]
+    cnt = np.bincount(labs, minlength=n + 1).astype(np.float64)
+    cr = np.bincount(labs, weights=rows, minlength=n + 1) / np.maximum(cnt, 1)
+    cc = np.bincount(labs, weights=cols, minlength=n + 1) / np.maximum(cnt, 1)
+    lat = LAT1 - cr / PPD
+    lng = LNG0 + cc / PPD
+    for k in range(1, n + 1):
+        if k not in edge and lng[k] > 119.2 and lat[k] < 25.4:
+            keep[k] = True
+    sites = json.load(open(os.path.join(ROOT, "data", "sites.json"), encoding="utf-8"))
+    F = sites["meta"]["fields"]
+    ila, ilo = F.index("lat"), F.index("lng")
+    h, w = land.shape
+    for r in sites["sites"]:
+        y = int((LAT1 - r[ila]) * PPD)
+        x = int((r[ilo] - LNG0) * PPD)
+        win = lab[max(0, y - 4):min(h, y + 5), max(0, x - 4):min(w, x + 5)]
+        keep[np.unique(win)] = True
+    keep[0] = False
+    return keep[lab]
+
+
+
 def sample(big, lng, lat):
     """雙線性取樣；lng、lat 是同形狀的陣列（像素中心）。範圍外是 0。"""
     x = (lng - LNG0) * PPD - 0.5
@@ -141,6 +172,7 @@ def main():
     os.makedirs(CACHE, exist_ok=True)
     print("讀取 DEM…")
     big = mosaic(offline)
+    big[(big > 0.5) & ~ours_mask(big > 0.5)] = 0      # 範圍外的陸地（福建沿海）壓平，和海面一樣高
     if os.path.isdir(OUT):
         shutil.rmtree(OUT)
     total, count = 0, 0
@@ -174,6 +206,18 @@ def main():
                 count += 1
         print("  第 %d 級 %d 張" % (z, len(up)))
         tiles = up
+    # 每處文資的地面高度（公尺，取整數；給光束立在地形上、導覽算海拔用）與本島陸地的海拔分布
+    S = json.load(open(os.path.join(ROOT, "data", "sites.json"), encoding="utf-8"))
+    F = S["meta"]["fields"]
+    la, lo = F.index("lat"), F.index("lng")
+    lat = np.array([r[la] for r in S["sites"]]); lng = np.array([r[lo] for r in S["sites"]])
+    elev = np.maximum(0, np.rint(sample(big, lng, lat))).astype(int).tolist()
+    land = big[(LAT1 - 26) * PPD:(LAT1 - 21) * PPD, (120 - LNG0) * PPD:(122 - LNG0) * PPD]
+    land = land[land > 0.5]
+    with open(os.path.join(OUT, "sites-elev.json"), "w", encoding="utf-8") as f:
+        json.dump({"note": "每處文資所在位置的地表高度（公尺），順序同 data/sites.json。來源是數值地表模型（含樹冠與建築），由約 90 公尺的格網內插，只是近似值。",
+                   "landShare": {"over500": round(float((land > 500).mean()), 3), "over1000": round(float((land > 1000).mean()), 3)},
+                   "h": elev}, f, ensure_ascii=False, separators=(",", ":"))
     meta = {
         "generated": datetime.date.today().isoformat(),
         "tiles": "data/terrain/{z}/{x}/{y}.png",
