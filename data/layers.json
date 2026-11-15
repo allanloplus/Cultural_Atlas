@@ -4,6 +4,8 @@
     { "id": "timeline", "title": "臺灣是怎麼長出來的", "short": "時間軸", "script": "assets/js/layers/timeline.js", "on": true
     },
     { "id": "survived", "title": "它挺過了什麼", "short": "挺過了什麼", "script": "assets/js/layers/survived.js", "on": true
+    },
+    { "id": "risk", "title": "文資風險地圖", "short": "風險地圖", "script": "assets/js/layers/risk.js", "on": false
     }
   ]
 }

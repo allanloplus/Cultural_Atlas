@@ -163,3 +163,11 @@ button, input, select { font: inherit; color: inherit; }
 .sv-sm { font-size: .8rem; color: var(--muted); margin-top: 5px; }
 .card { max-height: calc(100% - 60px); overflow: auto; }
 @media (max-width: 720px) { .sv-cap { min-height: 6.2em; } .tl-head .sv-tag { order: 6; } }
+
+/* ---------- 圖層：文資風險地圖 ---------- */
+.rk-seg { flex-wrap: wrap; border-radius: 16px; }
+.rk-seg button { padding: 4px 11px; }
+.rk-scen { font-size: .88rem; display: flex; align-items: center; gap: 6px; }
+.rk-scen select { padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); }
+.sv-box ul.rk-list { list-style: disc; padding-left: 1.2em; }
+.rk-list li { margin: 3px 0; }
