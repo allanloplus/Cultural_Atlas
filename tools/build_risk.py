@@ -34,7 +34,7 @@ SRC = {
 }
 FLOOD_BASE = "https://opendata.wra.gov.tw/cloud/25766InundationProbabilityMaps/"
 FLOOD_FILES = ["207-%02d.7z" % i for i in range(1, 18)] + ["223-18.7z", "223-19.7z", "223-20.7z"]
-FLOOD_SCENARIOS = ["24h350r", "24h500r", "24h650r"]      # 24 小時累積雨量 350、500、650 毫米
+FLOOD_SCENARIOS = ["24h350", "24h500", "24h650"]      # 24 小時累積雨量 350、500、650 毫米（各縣市檔名大小寫與結尾的 r 不一致）
 FLOOD_DEPTH = ["", "0–0.3 公尺", "0.3–0.5 公尺", "0.5–1 公尺", "1–2 公尺", "2–3 公尺", "3 公尺以上"]   # GRIDCODE 1–6
 FAULT_MAX_M = 5000        # 超過這個距離不記
 STREAM_MAX_M = 500
@@ -80,8 +80,8 @@ def read_shp(path):
         g = shapely.force_2d(shape(sr.shape.__geo_interface__))
         geoms.append(g if g.is_valid else shapely.make_valid(g))
         recs.append(sr.record.as_dict())
-    prj = path[:-4] + ".prj"
-    crs = CRS.from_wkt(open(prj).read()) if os.path.exists(prj) else TWD97
+    prj = [f for f in glob.glob(glob.escape(path[:-4]) + ".*") if f.lower().endswith(".prj")]
+    crs = CRS.from_wkt(open(prj[0]).read()) if prj else TWD97          # 沒附 .prj 的（例如臺南市）當成 TWD97 121 分帶
     return np.array(geoms, dtype=object), recs, crs
 
 
@@ -120,6 +120,13 @@ def nearest(geoms, x, y):
     return idx, shapely.distance(pts, geoms[idx])
 
 
+def scen_of(path):
+    """檔名 → 情境（24h350r.shp、24H350R.shp、24h350.shp 都算 24h350），不是要用的情境回 None"""
+    b = os.path.basename(path).rsplit(".", 1)[0].lower()
+    b = b[:-1] if b.endswith("r") else b
+    return b if b in FLOOD_SCENARIOS else None
+
+
 def flood(lng, lat):
     """回傳 shape (n, 情境數) 的 GRIDCODE（0＝不在模擬範圍或沒有資料）"""
     import py7zr
@@ -127,19 +134,21 @@ def flood(lng, lat):
     seen = np.zeros(len(lng), dtype=bool)
     for fn in FLOOD_FILES:
         d = os.path.join(CACHE, "flood", fn[:-3])
-        if not glob.glob(os.path.join(d, "**", "*.shp"), recursive=True):
+        if not glob.glob(os.path.join(d, "**", "*.[sS][hH][pP]"), recursive=True):
             try:
                 z = fetch(FLOOD_BASE + fn, fn)
             except IOError as e:
                 print("  注意：%s，這個縣市的淹水欄位會是空的" % e)
                 continue
             with py7zr.SevenZipFile(z) as a:
-                want = [n for n in a.getnames() if os.path.basename(n).rsplit(".", 1)[0] in FLOOD_SCENARIOS
-                        and n.rsplit(".", 1)[-1].lower() in ("shp", "shx", "dbf", "prj", "cpg")]
+                want = [n for n in a.getnames() if scen_of(n) and n.rsplit(".", 1)[-1].lower() in ("shp", "shx", "dbf", "prj", "cpg")]
+                if not any(n.lower().endswith(".shp") for n in want):
+                    print("  注意：%s 裡找不到要用的情境，檔名可能又換了格式；壓縮檔保留在 .cache/risk/" % fn)
+                    continue
                 a.extract(path=d, targets=want)
             os.remove(z)          # 壓縮檔很大（多半是圖片），取出向量檔後就刪
         for k, sc in enumerate(FLOOD_SCENARIOS):
-            shp = glob.glob(os.path.join(d, "**", sc + ".shp"), recursive=True)
+            shp = [f for f in glob.glob(os.path.join(d, "**", "*.[sS][hH][pP]"), recursive=True) if scen_of(f) == sc]
             if not shp:
                 print("  注意：%s 沒有 %s" % (fn, sc))
                 continue
