@@ -15,7 +15,7 @@ repo 裡只有計算結果。全部圖資依「政府資料開放授權條款－
 需要：pip install pyshp shapely pyproj py7zr
 用法：python3 tools/build_risk.py [--offline]
 """
-import glob, json, os, sys, time, zipfile, datetime, urllib.request
+import glob, json, os, re, sys, time, zipfile, datetime, urllib.request
 import numpy as np
 import shapefile
 import shapely
@@ -121,10 +121,25 @@ def nearest(geoms, x, y):
 
 
 def scen_of(path):
-    """檔名 → 情境（24h350r.shp、24H350R.shp、24h350.shp 都算 24h350），不是要用的情境回 None"""
-    b = os.path.basename(path).rsplit(".", 1)[0].lower()
-    b = b[:-1] if b.endswith("r") else b
-    return b if b in FLOOD_SCENARIOS else None
+    """檔名 → 情境。各縣市檔名格式都不同：24h350r、24H350R、24h350、24hr350mm、24hr_350mm、tp_24h_r350_polygon_class_1、PT24H350mm…"""
+    m = re.search(r"(?<!\d)24\s*hr?_?r?(\d{3})(?!\d)", os.path.basename(path), re.I)
+    return "24h" + m.group(1) if m and "24h" + m.group(1) in FLOOD_SCENARIOS else None
+
+
+DEPTH_START = {0.0: 1, 0.3: 2, 0.5: 3, 1.0: 4, 2.0: 5, 3.0: 6}
+
+
+def depth_code(rec):
+    """一筆淹水多邊形的屬性 → 深度代碼 1–6。優先讀深度文字（0-0.3、0.3-0.5、…、>3），其次讀 1–6 的分級欄位；讀不出來回 None"""
+    for v in rec.values():
+        if isinstance(v, str):
+            m = re.match(r"\s*[>＞]?\s*(\d+(?:\.\d+)?)\s*(?:[-~–]|m|公尺|以上|$)", v)
+            if m and float(m.group(1)) in DEPTH_START and ("-" in v or "~" in v or ">" in v or "＞" in v or "以上" in v):
+                return DEPTH_START[float(m.group(1))]
+    for k, v in rec.items():
+        if k.lower() in ("gridcode", "grid_code", "class", "level", "dn", "id") and isinstance(v, (int, float)) and 1 <= v <= 6:
+            return int(v)
+    return None
 
 
 def flood(lng, lat):
@@ -148,22 +163,29 @@ def flood(lng, lat):
                 a.extract(path=d, targets=want)
             os.remove(z)          # 壓縮檔很大（多半是圖片），取出向量檔後就刪
         for k, sc in enumerate(FLOOD_SCENARIOS):
-            shp = [f for f in glob.glob(os.path.join(d, "**", "*.[sS][hH][pP]"), recursive=True) if scen_of(f) == sc]
-            if not shp:
+            shps = [f for f in glob.glob(os.path.join(d, "**", "*.[sS][hH][pP]"), recursive=True) if scen_of(f) == sc]
+            if not shps:
                 print("  注意：%s 沒有 %s" % (fn, sc))
-                continue
-            geoms, recs, crs = read_shp(shp[0])
-            x, y = project(lng, lat, crs)
-            b = shapely.total_bounds(geoms)
-            cand = np.nonzero((x >= b[0]) & (x <= b[2]) & (y >= b[1]) & (y <= b[3]))[0]
-            if not len(cand):
-                continue
-            pts = shapely.points(x[cand], y[cand])
-            for g, r in zip(geoms, recs):
-                shapely.prepare(g)
-                hit = cand[shapely.contains(g, pts)]
-                out[hit, k] = np.maximum(out[hit, k], int(r["GRIDCODE"]))
-                seen[hit] = True
+            for path in shps:          # 有的壓縮檔含兩個縣市（新竹縣市、嘉義縣市）
+                geoms, recs, crs = read_shp(path)
+                x, y = project(lng, lat, crs)
+                b = shapely.total_bounds(geoms)
+                cand = np.nonzero((x >= b[0]) & (x <= b[2]) & (y >= b[1]) & (y <= b[3]))[0]
+                if not len(cand):
+                    continue
+                pts = shapely.points(x[cand], y[cand])
+                bad = 0
+                for g, r in zip(geoms, recs):
+                    code = depth_code(r)
+                    if code is None:
+                        bad += 1
+                        continue
+                    shapely.prepare(g)
+                    hit = cand[shapely.contains(g, pts)]
+                    out[hit, k] = np.maximum(out[hit, k], code)
+                    seen[hit] = True
+                if bad:
+                    print("  注意：%s 有 %d／%d 筆讀不出淹水深度，欄位：%s" % (os.path.relpath(path, d), bad, len(recs), recs[0]))
         print("  淹水 %s：累計 %d 處文資落在模擬範圍內" % (fn, seen.sum()))
     return out, seen
 
