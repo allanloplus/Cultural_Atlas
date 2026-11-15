@@ -224,3 +224,18 @@ button, input, select { font: inherit; color: inherit; }
   .is-tour { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 62%; overflow: auto; font-size: .86rem; padding: 10px 12px; }
   .is-tour h3 { font-size: 1.05rem; }
 }
+
+/* 3D 文資島：海拔 */
+.is-lv { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 8px; font-size: .88rem; }
+.is-lv input { flex: 1; min-width: 160px; accent-color: var(--teal); }
+.is-lv b { font-variant-numeric: tabular-nums; }
+.is-dist { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.is-db { display: grid; grid-template-columns: 5.6em 1fr 2.8em; column-gap: 6px; align-items: center; font-size: .74rem; line-height: 1.25; margin-top: 3px; }
+.is-db span { grid-row: span 2; color: var(--muted); }
+.is-db i { display: block; height: 7px; border-radius: 3px; min-width: 2px; }
+.is-db i.land { background: var(--line); }
+.is-db b { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+.is-db b.land { font-weight: 400; color: var(--muted); }
+.is-top { margin: 4px 0 0; padding-left: 1.4em; font-size: .78rem; line-height: 1.5; }
+.is-top button { border: 0; background: none; padding: 0; color: var(--teal); cursor: pointer; text-align: left; font-size: inherit; }
+.is-q { margin-left: 4px; font-size: .68rem; padding: 0 5px; border-radius: 999px; border: 1px solid var(--bad); color: var(--bad); white-space: nowrap; }
