@@ -14,9 +14,13 @@
 
 ## 目前的內容
 
-**3D 文資島（首頁）**：立體的臺灣地形上，3,032 處文資各是一根光柱，可以旋轉、傾斜。
+**3D 文資島（首頁）**：立體的臺灣地形上看 3,032 處文資，可以旋轉、傾斜。
 
-- 柱高分三級，只代表等級：國定古蹟最高；直轄市定、縣市定古蹟次之；其餘（歷史建築、紀念建築、聚落建築群、文化景觀、考古遺址）最低。
+- 底圖是本站用地形算出的「紙雕」分層設色與山影（`data/relief/`，淺色、深色各一套），不含道路與文字；地名用網頁文字標縣市與玉山、雪山。範圍外的陸地（福建沿海）壓平，只留淡淡的海岸線。
+- 遠看（縮放 9.7 級以下）是六角聚合柱：寬約 6 公里的格子，高度是格內處數的平方根，顏色是格內最多的那一類；點六角柱會拉近。拉近後換成每處一根柱子。
+- 「島怎麼長出來」：從 1550 年播到今天，柱子依創建年長出來，畫面上方顯示年份、時代與歷史節點。
+- 「導覽 8 站」：每站的事實都在網頁上由資料即時算出（文資的海拔分布、府城、最密的一平方公里、阿里山、東部、集集地震、金門、最孤單的文資）。文資增減後數字會自動更新，但站點的鏡頭位置與說明文字是寫死的，見 `island.js` 的 `STOPS`。
+- 單根柱子的高度分三級，只代表等級：國定古蹟最高；直轄市定、縣市定古蹟次之；其餘（歷史建築、紀念建築、聚落建築群、文化景觀、考古遺址）最低。
 - 顏色可切換：類別（預設）、年代、地震（歷來最大推估震度）、風險（災害潛勢標籤數）。換顏色時柱高不變；每種顏色附「看完整圖層」連到對應的平面分頁。地震與風險直接用下面兩個圖層的資料與算法，並保留「推估」「僅供防災參考」的標示。
 - 進站會慢慢環繞一圈，碰一下就停；系統設定「減少動態效果」時不轉。面板上有向左轉、向右轉、俯視／斜看、全島、環繞一圈的按鈕，手機不用手勢也能操作。
 - 地形高度誇大 2.5 倍，解析度約 140 公尺，只呈現大地勢。
@@ -63,7 +67,8 @@ data/sites.json             全臺有形文資的精簡主檔（所有圖層共�
 data/survived.json          每處文資的推估震度與颱風通過紀錄
 data/risk.json              每處文資的災害潛勢標籤
 data/risk-lines.geojson     地圖上畫的活動斷層與土石流潛勢溪流（已簡化）
-data/terrain/               3D 文資島的地形圖磚（Terrarium 編碼的 PNG，第 5–10 級）與 meta.json
+data/terrain/               3D 文資島的地形圖磚（Terrarium 編碼的 PNG，第 5–10 級）、meta.json、sites-elev.json（每處文資的地面高度）
+data/relief/                3D 文資島的底圖圖磚（WebP，第 5–11 級，light／dark 兩套）
 data/raw/                   抓一次就存檔的原始清單（災害地震、颱風中文名）
 data/layers.json            圖層清單
 tools/build_sites.py        產生 data/sites.json
@@ -72,6 +77,7 @@ tools/fetch_typhoon_names.py 抓氣象署颱風中文名 → data/raw/typhoon-na
 tools/build_survived.py     產生 data/survived.json
 tools/build_risk.py         產生 data/risk.json、data/risk-lines.geojson
 tools/build_terrain.py      產生 data/terrain/
+tools/build_relief.py       產生 data/relief/（要先跑過 build_terrain.py 下載 DEM）
 ```
 
 ### 更新資料
@@ -130,21 +136,26 @@ python3 tools/build_risk.py
 地形不會變，平常不需要重跑；要改解析度或範圍時才需要：
 
 ```bash
-pip install numpy pillow rasterio
+pip install numpy pillow rasterio scipy
 ```
 
 ```bash
 python3 tools/build_terrain.py
 ```
 
-會從 AWS 公開桶下載 Copernicus DEM GLO-30 的 19 個 1°×1° 檔到 `.cache/dem/`（約 320 MB，不進 repo；加 `--offline` 只用已下載的檔案），降到約 90 公尺後重新取樣成 Web Mercator 第 10 級圖磚（每像素約 140 公尺），再往上平均出第 5–9 級。輸出 336 張圖磚、約 6 MB。
+```bash
+python3 tools/build_relief.py
+```
+
+會從 AWS 公開桶下載 Copernicus DEM GLO-30 的 19 個 1°×1° 檔到 `.cache/dem/`（約 320 MB，不進 repo；加 `--offline` 只用已下載的檔案），降到約 90 公尺後重新取樣成 Web Mercator 第 10 級圖磚（每像素約 140 公尺），再往上平均出第 5–9 級。輸出 336 張圖磚、約 3 MB，以及每處文資的地面高度 `sites-elev.json`（導覽用；`data/sites.json` 有變動就要重跑）。`build_relief.py` 用同一份 DEM 產生底圖，兩套共 2,284 張、約 2.2 MB；分層的海拔門檻與配色寫在腳本開頭。
 
 - 高度取整數公尺，用 Terrarium 編碼（高度 = R×256 + G − 32768）。海面與沒有資料的地方是 0。
 - 範圍（東經 118–122.4、北緯 21.7–26.5）內全是海的圖磚也會輸出，網頁才不會抓到 404。範圍、級數有改時，`assets/js/layers/island.js` 開頭的 `TERRAIN` 要跟著改。
-- 範圍包含金門、馬祖對岸的福建沿海，那裡的地形也會立起來。
+- 範圍外的陸地（福建沿海）在兩支腳本裡都會被處理掉：地形壓平成海面，底圖只留淡淡的海岸線。判斷方式在 `build_terrain.py` 的 `ours_mask`：有文資的島，或東經 119.2 度以東、北緯 25.4 度以南、不連到圖框邊的陸地。
 - 下載偶爾會中途斷線而不報錯，腳本會比對檔案大小並自動重試。
-- 文資增減不必重跑：光柱是網頁依 `data/sites.json` 即時畫的，地震與風險的顏色來自 `data/survived.json`、`data/risk.json`。
-- 光柱的粗細、三級高度、誇大倍數、環繞一圈的時間、效能門檻，都是 `island.js` 開頭的常數。
+- 文資增減只需要重跑 `build_terrain.py`（更新 `sites-elev.json`）；柱子是網頁依 `data/sites.json` 即時畫的，地震與風險的顏色來自 `data/survived.json`、`data/risk.json`。
+- 柱子的粗細、三級高度、六角格大小、切換縮放級、誇大倍數、環繞一圈與播放的時間、效能門檻，都是 `island.js` 開頭的常數。
+- 曾試過自己寫 WebGL 圖層畫發光的光束，但 MapLibre 4.7.1 開地形時，自繪圖層在山區對不齊地形，而且不能點選，所以沿用 fill-extrusion。
 
 ### 新增圖層
 
@@ -165,7 +176,7 @@ python3 -m http.server 8000
 
 GitHub Pages：Settings → Pages → Deploy from a branch，選 `main` 與 `/ (root)`。自訂網域寫在 `CNAME`（`cultural-atlas.123hi.org`），DNS 需要一筆 CNAME 記錄指向 `allanloplus.github.io`。開發在工作分支進行，合併到 `main` 才上線。
 
-GitHub Pages 每個網站上限 1 GB。本站不放照片與語音，目前約 10.5 MB（其中地形圖磚約 7 MB）；之後加入圖資時，要在建置腳本裡先簡化再輸出，並在這裡記錄用量。
+GitHub Pages 每個網站上限 1 GB。本站不放照片與語音，目前約 7 MB（其中地形與底圖圖磚約 5 MB）；之後加入圖資時，要在建置腳本裡先簡化再輸出，並在這裡記錄用量。
 
 ## 資料來源與授權
 
