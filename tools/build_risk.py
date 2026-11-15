@@ -127,8 +127,15 @@ def nearest(geoms, x, y):
     return idx, shapely.distance(pts, geoms[idx])
 
 
+# 完全不照規則命名的檔：檔名（小寫、不含副檔名）→ 情境
+FLOOD_ALIAS = {"rastert_n246502_dissolve": "24h650"}     # 彰化縣的 24 小時 650 毫米
+
+
 def scen_of(path):
     """檔名 → 情境。各縣市檔名格式都不同：24h350r、24H350R、24h350、24hr350mm、24hr_350mm、tp_24h_r350_polygon_class_1、PT24H350mm…"""
+    base = os.path.basename(path).rsplit(".", 1)[0].lower()
+    if base in FLOOD_ALIAS:
+        return FLOOD_ALIAS[base]
     m = re.search(r"(?<!\d)24\s*hr?_?r?(\d{3})(?!\d)", os.path.basename(path), re.I)
     return "24h" + m.group(1) if m and "24h" + m.group(1) in FLOOD_SCENARIOS else None
 
