@@ -176,7 +176,7 @@ python3 -m http.server 8000
 
 GitHub Pages：Settings → Pages → Deploy from a branch，選 `main` 與 `/ (root)`。自訂網域寫在 `CNAME`（`cultural-atlas.123hi.org`），DNS 需要一筆 CNAME 記錄指向 `allanloplus.github.io`。開發在工作分支進行，合併到 `main` 才上線。
 
-GitHub Pages 每個網站上限 1 GB。本站不放照片與語音，目前約 7 MB（其中地形與底圖圖磚約 5 MB）；之後加入圖資時，要在建置腳本裡先簡化再輸出，並在這裡記錄用量。
+GitHub Pages 每個網站上限 1 GB。本站不放照片與語音，目前約 8.6 MB（其中地形與底圖圖磚約 5.3 MB）；之後加入圖資時，要在建置腳本裡先簡化再輸出，並在這裡記錄用量。
 
 ## 資料來源與授權
 
