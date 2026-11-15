@@ -68,11 +68,18 @@ def fetch(url, name, tries=4):
 
 def read_shp(path):
     """回傳 (幾何陣列, 屬性 list, pyproj CRS)"""
-    enc = "utf-8"
-    cpg = path[:-4] + ".cpg"
-    if os.path.exists(cpg) and "950" in open(cpg).read():
-        enc = "big5"
-    r = shapefile.Reader(path, encoding=enc, encodingErrors="replace")
+    cpg = [f for f in glob.glob(glob.escape(path[:-4]) + ".*") if f.lower().endswith(".cpg")]
+    hint = open(cpg[0], errors="replace").read().lower() if cpg else ""
+    encs = ["big5", "utf-8"] if ("950" in hint or "big5" in hint) else ["utf-8", "big5"]
+    for enc in encs:                      # .cpg 不一定可靠：先照它讀，中文解不出來就換另一種
+        try:
+            r = shapefile.Reader(path, encoding=enc)
+            r.records()
+            break
+        except Exception:  # noqa: BLE001  解碼失敗（pyshp 會丟自己的例外，例如欄位被截斷在中文字中間）
+            r = None
+    if r is None:
+        r = shapefile.Reader(path, encoding=encs[0], encodingErrors="replace")
     geoms, recs = [], []
     for sr in r.iterShapeRecords():
         if not sr.shape.points:
@@ -120,36 +127,57 @@ def nearest(geoms, x, y):
     return idx, shapely.distance(pts, geoms[idx])
 
 
+# 完全不照規則命名的檔：檔名（小寫、不含副檔名）→ 情境
+FLOOD_ALIAS = {"rastert_n246502_dissolve": "24h650"}     # 彰化縣的 24 小時 650 毫米
+
+
 def scen_of(path):
     """檔名 → 情境。各縣市檔名格式都不同：24h350r、24H350R、24h350、24hr350mm、24hr_350mm、tp_24h_r350_polygon_class_1、PT24H350mm…"""
+    base = os.path.basename(path).rsplit(".", 1)[0].lower()
+    if base in FLOOD_ALIAS:
+        return FLOOD_ALIAS[base]
     m = re.search(r"(?<!\d)24\s*hr?_?r?(\d{3})(?!\d)", os.path.basename(path), re.I)
     return "24h" + m.group(1) if m and "24h" + m.group(1) in FLOOD_SCENARIOS else None
 
 
+GRADE_FIELDS = ("gridcode", "grid_code", "rank", "class", "level", "色階")
 DEPTH_START = {0.0: 1, 0.3: 2, 0.5: 3, 1.0: 4, 2.0: 5, 3.0: 6}
 
 
-def depth_code(rec):
-    """一筆淹水多邊形的屬性 → 深度代碼 1–6。優先讀深度文字（0-0.3、0.3-0.5、…、>3），其次讀 1–6 的分級欄位；讀不出來回 None"""
+def depth_code(rec, nclass):
+    """一筆淹水多邊形的屬性 → 深度代碼 1–6（1＝0–0.3、2＝0.3–0.5、3＝0.5–1、4＝1–2、5＝2–3、6＝3 公尺以上）。
+    各縣市欄位都不同，先讀深度文字（「0.3-0.5」「0.3m~0.5m」「0.3公尺<淹水深度<0.5公尺」「淹水深度>3.0公尺」「<0.3」「>3」），
+    讀不到才用 1 起算的分級欄位：整個檔有 6 級時直接用，只有 5 級時是從 0.3–0.5 公尺起算（＋1；臺北、雲林、屏東等有文字可對照，
+    金門、連江、澎湖只有 RANK 欄位，比照辦理）。"""
     for v in rec.values():
-        if isinstance(v, str):
-            m = re.match(r"\s*[>＞]?\s*(\d+(?:\.\d+)?)\s*(?:[-~–]|m|公尺|以上|$)", v)
-            if m and float(m.group(1)) in DEPTH_START and ("-" in v or "~" in v or ">" in v or "＞" in v or "以上" in v):
-                return DEPTH_START[float(m.group(1))]
+        if not isinstance(v, str) or not v.strip():
+            continue
+        nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", v)]
+        if not nums or any(n not in DEPTH_START for n in nums) or len(nums) > 2:
+            continue                      # 例如情境說明「24小時定量降雨500毫米」
+        if len(nums) == 2:
+            return DEPTH_START[min(nums)]
+        if nums[0] == 3.0:
+            return 6
+        if nums[0] == 0.3 and "<" in v:
+            return 1
     for k, v in rec.items():
-        if k.lower() in ("gridcode", "grid_code", "class", "level", "dn", "id") and isinstance(v, (int, float)) and 1 <= v <= 6:
-            return int(v)
+        if k.lower() in GRADE_FIELDS and isinstance(v, (int, float)) and 1 <= v <= nclass:
+            return int(v) if nclass == 6 else int(v) + 1 if nclass == 5 else None
     return None
 
 
 def flood(lng, lat):
-    """回傳 shape (n, 情境數) 的 GRIDCODE（0＝不在模擬範圍或沒有資料）"""
+    """回傳 shape (n, 情境數) 的深度代碼（0＝未達 0.3 公尺或不在模擬範圍）。
+    只有部分縣市的檔案含 0–0.3 公尺那一級（等於模擬範圍），其他縣市只有 0.3 公尺以上的多邊形，
+    所以全臺一律不區分「範圍內但沒淹」與「不在範圍」，代碼 1 也記成 0。"""
     import py7zr
     out = np.zeros((len(lng), len(FLOOD_SCENARIOS)), dtype=int)
     seen = np.zeros(len(lng), dtype=bool)
     for fn in FLOOD_FILES:
         d = os.path.join(CACHE, "flood", fn[:-3])
-        if not glob.glob(os.path.join(d, "**", "*.[sS][hH][pP]"), recursive=True):
+        have = {scen_of(f) for f in glob.glob(os.path.join(d, "**", "*.[sS][hH][pP]"), recursive=True)} - {None}
+        if len(have) < len(FLOOD_SCENARIOS):
             try:
                 z = fetch(FLOOD_BASE + fn, fn)
             except IOError as e:
@@ -175,18 +203,22 @@ def flood(lng, lat):
                     continue
                 pts = shapely.points(x[cand], y[cand])
                 bad = 0
+                # 只有分級數字、沒有深度文字的檔：出現過第 6 級就是六級制，否則當成五級制（從 0.3–0.5 公尺起算）
+                grades = [v for r in recs for kk, v in r.items() if kk.lower() in GRADE_FIELDS and isinstance(v, (int, float))]
+                nclass = 6 if grades and max(grades) >= 6 else 5
                 for g, r in zip(geoms, recs):
-                    code = depth_code(r)
+                    code = depth_code(r, nclass)
                     if code is None:
                         bad += 1
                         continue
                     shapely.prepare(g)
                     hit = cand[shapely.contains(g, pts)]
-                    out[hit, k] = np.maximum(out[hit, k], code)
-                    seen[hit] = True
+                    if code >= 2:
+                        out[hit, k] = np.maximum(out[hit, k], code)
+                        seen[hit] = True
                 if bad:
                     print("  注意：%s 有 %d／%d 筆讀不出淹水深度，欄位：%s" % (os.path.relpath(path, d), bad, len(recs), recs[0]))
-        print("  淹水 %s：累計 %d 處文資落在模擬範圍內" % (fn, seen.sum()))
+        print("  淹水 %s：累計 %d 處文資在任一情境淹水 0.3 公尺以上" % (fn, seen.sum()))
     return out, seen
 
 
@@ -233,11 +265,11 @@ def main():
             ls = [2, lr[li[i]]["lslno"], RISK_CODE.get(lr[li[i]]["Risk"], 0)]                   # 潛勢區內
         elif main_zone[i] and mi[i] >= 0:
             ls = [1, mr[mi[i]]["Islno"], RISK_CODE.get(mr[mi[i]]["Risk"], 0)]                   # 影響範圍內
-        rows.append([fault[i], deb, ls, [int(v) for v in fz[i]] if seen[i] else None])
+        rows.append([fault[i], deb, ls, [int(v) for v in fz[i]]])
 
     out = {"meta": {"generated": datetime.date.today().isoformat(),
                     "fields": ["fault", "debris", "landslide", "flood"],
-                    "note": "每處文資一列，順序同 sites.json。fault=[斷層名索引, 距離公尺]（%d 公尺內才有）；debris=[1 在影響範圍內／0 靠近溪流, 溪流編號, 風險 1低2中3高4持續觀察, 距溪流公尺]；landslide=[2 潛勢區內／1 影響範圍內, 編號, 風險]；flood=[%s 三個情境的淹水深度代碼]，null 表示不在模擬範圍。" % (FAULT_MAX_M, "、".join(FLOOD_SCENARIOS)),
+                    "note": "每處文資一列，順序同 sites.json。fault=[斷層名索引, 距離公尺]（%d 公尺內才有）；debris=[1 在影響範圍內／0 靠近溪流, 溪流編號, 風險 1低2中3高4持續觀察, 距溪流公尺]；landslide=[2 潛勢區內／1 影響範圍內, 編號, 風險]；flood=[%s 三個情境的淹水深度代碼]，0 表示未達 0.3 公尺或不在模擬範圍。" % (FAULT_MAX_M, "、".join(FLOOD_SCENARIOS)),
                     "floodScenarios": ["24 小時 350 毫米", "24 小時 500 毫米", "24 小時 650 毫米"], "floodDepth": FLOOD_DEPTH,
                     "attribution": [
                         "經濟部水利署（2018）淹水潛勢圖（第三代）",
@@ -266,7 +298,7 @@ def main():
     print("斷層 100 公尺內 %d、500 公尺內 %d；土石流影響範圍內 %d、溪流 %d 公尺內 %d；大規模崩塌 %d；" % (
         c(lambda r: r[0] and r[0][1] <= 100), c(lambda r: r[0] and r[0][1] <= 500), c(lambda r: r[1] and r[1][0] == 1),
         STREAM_MAX_M, c(lambda r: r[1] and r[1][0] == 0), c(lambda r: r[2])))
-    print("淹水模擬範圍內 %d 處；淹水 0.5 公尺以上：%s" % (seen.sum(), "、".join(
+    print("任一情境淹水 0.3 公尺以上 %d 處；淹水 0.5 公尺以上：%s" % (seen.sum(), "、".join(
         "%s %d 處" % (out["meta"]["floodScenarios"][k], c(lambda r, k=k: r[3] and r[3][k] >= 3)) for k in range(3))))
 
 

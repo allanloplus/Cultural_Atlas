@@ -5,7 +5,7 @@
     },
     { "id": "survived", "title": "它挺過了什麼", "short": "臺灣挺過了什麼", "script": "assets/js/layers/survived.js", "on": true
     },
-    { "id": "risk", "title": "文資風險地圖", "short": "臺灣文資風險地圖", "script": "assets/js/layers/risk.js", "on": false
+    { "id": "risk", "title": "文資風險地圖", "short": "臺灣文資風險地圖", "script": "assets/js/layers/risk.js", "on": true
     },
     { "id": "island", "title": "3D 文資島", "short": "3D文資島", "script": "assets/js/layers/island.js", "on": false
     }
