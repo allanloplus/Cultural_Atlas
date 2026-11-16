@@ -45,6 +45,10 @@ button, input, select { font: inherit; color: inherit; }
 .top-links { flex: none; display: flex; gap: 14px; font-size: .9rem; margin-left: auto; }
 .top-links a { text-decoration: none; white-space: nowrap; }
 .top-links a:hover { text-decoration: underline; }
+/* 回主網站（文資知識網站）的按鈕，手機上也保留 */
+.top-links { align-items: center; }
+.top-links a.home-link { color: var(--teal); border: 1.5px solid var(--teal); border-radius: 999px; font-weight: 700; padding: 3px 12px; }
+.top-links a.home-link:hover, .top-links a.home-link:focus-visible { background: var(--teal); color: var(--paper); text-decoration: none; }
 
 /* ---------- 地圖舞台 ---------- */
 .stage { height: calc(100vh - var(--hdr)); height: calc(100dvh - var(--hdr)); display: grid; grid-template-rows: minmax(0, 1fr) auto; }
