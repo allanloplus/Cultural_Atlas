@@ -221,8 +221,13 @@ button, input, select { font: inherit; color: inherit; }
   .is-lab { font-size: .8rem; letter-spacing: .1em; }
   .is-year b { font-size: 2.2rem; }
   .is-year small { font-size: .78rem; }
-  .is-tour { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 62%; overflow: auto; font-size: .86rem; padding: 10px 12px; }
-  .is-tour h3 { font-size: 1.05rem; }
+  /* 手機：導覽卡片放進下方面板，取代面板原本的內容，地圖不被遮住 */
+  .panel.is-touring > :not(.is-tour) { display: none; }
+  .panel .is-tour { position: static; width: auto; box-shadow: none; border: 0; border-left: 4px solid var(--teal); border-radius: 8px; background: transparent; padding: 0 0 0 10px; font-size: .86rem; line-height: 1.6; }
+  .is-tour h3 { font-size: 1.05rem; margin: 0 0 2px; }
+  .is-tour-nav { margin-top: 8px; }
+  .is-tour-nav button { min-height: 38px; }
+  .is-intro, .is-cap { display: none; }        /* 手機：說明文字放「資料說明」，面板只留操作，地圖區才夠高 */
 }
 
 /* 3D 文資島：海拔 */
