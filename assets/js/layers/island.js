@@ -39,6 +39,7 @@
 
   var mode = "cat", cls = [], ks = [], rings = null, hexes = null, elev = null, entered = false, active = false, orbit = null, checked = false, toast = null;
   var grow = null, tour = null, labels = [], year = null;
+  var narrow = window.matchMedia("(max-width: 720px)");   /* 手機：導覽卡片放在下方面板，不蓋住地圖 */
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)"), coarse = window.matchMedia("(pointer: coarse)");
 
   function ss(k, v) { try { if (v === undefined) return sessionStorage.getItem(k); sessionStorage.setItem(k, v); } catch (e) { return null; } }
@@ -339,19 +340,24 @@
     tour = null;
     var el = document.getElementById("isTour"); if (el) el.remove();
     var b = document.getElementById("isTourBtn"); if (b) b.setAttribute("aria-pressed", "false");
+    if (A.panel.classList.contains("is-touring")) { A.panel.classList.remove("is-touring"); A.map.resize(); }
   }
   function startTour() { stopGrow(); stopOrbit(); A.hideCard(); tour = { k: 0 }; goStop(0); var b = document.getElementById("isTourBtn"); if (b) b.setAttribute("aria-pressed", "true"); }
   function goStop(k) {
     var list = STOPS.filter(function (s) { return !s.need || s.need(); });
     k = Math.max(0, Math.min(list.length - 1, k));
     tour = { k: k };
-    var S = list[k], el = document.getElementById("isTour");
+    var S = list[k], el;
     Promise.all([loadMode(S.mode), elevP]).then(function () {
       if (!tour || tour.k !== k) return;
       var d = S.prep ? S.prep() : {};
       if (!d) return goStop(k + 1);
       if (mode !== S.mode) { mode = S.mode; A.setHash("island/" + mode); if (level) setLevel(0); show(); }
-      if (!el) { el = document.createElement("div"); el.id = "isTour"; el.className = "is-tour"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "導覽"); A.map.getContainer().parentNode.appendChild(el); }
+      el = document.getElementById("isTour");
+      if (!el) { el = document.createElement("div"); el.id = "isTour"; el.className = "is-tour"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "導覽"); }
+      var home = narrow.matches ? A.panel : A.map.getContainer().parentNode;
+      if (el.parentNode !== home) home.appendChild(el);
+      if (narrow.matches !== A.panel.classList.contains("is-touring")) { A.panel.classList.toggle("is-touring", narrow.matches); A.map.resize(); }
       el.innerHTML = '<p class="is-tour-k">導覽 ' + (k + 1) + "／" + list.length + (S.tag ? '　<span class="sv-tag">' + S.tag + "</span>" : "") + '</p><h3>' + esc(S.title) + "</h3><p>" + S.text(d) + "</p>" +
         '<div class="is-tour-nav"><button type="button" data-d="-1"' + (k ? "" : " disabled") + '>‹ 上一站</button><button type="button" data-d="0">結束</button>' +
         '<button type="button" data-d="1" class="go"' + (k < list.length - 1 ? "" : " disabled") + ">下一站 ›</button></div>";
@@ -398,7 +404,7 @@
 
   /* ---------- 面板、圖例、說明 ---------- */
   function render(counts) {
-    var M = modeDef(), list = modes();
+    var M = modeDef(), list = modes(), keep = document.getElementById("isTour");
     A.panel.innerHTML =
       '<div class="tl-head"><div class="seg rk-seg" role="group" aria-label="柱子顏色">' +
       list.map(function (m) { return '<button type="button" data-m="' + m.id + '" aria-pressed="' + (m.id === mode) + '">' + m.name + "</button>"; }).join("") + "</div>" +
@@ -413,11 +419,12 @@
       '<button type="button" data-cam="tilt" title="切換俯視與斜看">' + (A.map.getPitch() > 20 ? "俯視" : "斜看") + "</button>" +
       '<button type="button" data-cam="home" title="回到全島">全島</button>' +
       '<button type="button" id="isSpin" aria-pressed="' + !!orbit + '">環繞</button></span></div>' +
-      '<p class="tl-cap is-cap"><b>3D 文資島</b>　' + fmt(A.sites.length) + " 處文化資產。遠看是六角柱，高度是約 6 公里格子內的處數；拉近後變成每處一根，越高等級越高。" + M.cap +
+      '<p class="tl-cap is-cap"><span class="is-intro"><b>3D 文資島</b>　' + fmt(A.sites.length) + " 處文化資產。遠看是六角柱，高度是約 6 公里格子內的處數；拉近後變成每處一根，越高等級越高。</span>" + M.cap +
       '<span class="sv-method">' + (coarse.matches ? "單指拖曳平移，兩指張合縮放、轉動旋轉、一起上下滑傾斜；點六角柱拉近，點柱子看介紹。" : "拖曳平移，按住右鍵或 Ctrl 拖曳可旋轉與傾斜；點六角柱拉近，點柱子看介紹。") + "地形高度誇大 " + EXAGGERATION + " 倍。</span></p>";
     Array.prototype.forEach.call(A.panel.querySelectorAll(".seg button"), function (b) {
       b.onclick = function () { stopGrow(); location.hash = "#island/" + b.dataset.m; };
     });
+    if (keep && keep.parentNode !== A.panel && narrow.matches && tour) A.panel.appendChild(keep);   /* 手機導覽中重畫面板時，卡片留著 */
     var lv = document.getElementById("isLv");
     if (lv) { lv.oninput = function () { stopGrow(); setLevel(+lv.value); }; setLevel(level); }
     document.getElementById("isSpin").onclick = function () { if (orbit) stopOrbit(); else { stopGrow(); stopTour(); startOrbit(); } };
@@ -490,7 +497,8 @@
       A.map.addSource(DEM, { type: "raster-dem", tiles: [base + "data/terrain/{z}/{x}/{y}.png"], encoding: "terrarium", tileSize: TERRAIN.tileSize, minzoom: TERRAIN.minzoom, maxzoom: TERRAIN.maxzoom, bounds: TERRAIN.bounds, attribution: "地形：" + DEM_NOTICE });
       ["light", "dark"].forEach(function (t) {
         A.map.addSource(RELIEF + t, { type: "raster", tiles: [base + "data/relief/" + t + "/{z}/{x}/{y}.webp"], tileSize: 256, minzoom: RELIEF_Z.minzoom, maxzoom: RELIEF_Z.maxzoom, bounds: TERRAIN.bounds });
-        A.map.addLayer({ id: RELIEF + t, type: "raster", source: RELIEF + t, layout: { visibility: "none" }, paint: { "raster-fade-duration": 0 } });
+        /* 拉近到街區（12 級以上）時淡出，露出下面的通用電子地圖，才看得到街道 */
+        A.map.addLayer({ id: RELIEF + t, type: "raster", source: RELIEF + t, layout: { visibility: "none" }, paint: { "raster-fade-duration": 0, "raster-opacity": ["interpolate", ["linear"], ["zoom"], 11.3, 1, 12.6, 0] } });
       });
       var fadeOut = ["interpolate", ["linear"], ["zoom"], SWITCH[0], 0.93, SWITCH[1], 0], fadeIn = ["interpolate", ["linear"], ["zoom"], SWITCH[0], 0, SWITCH[1], 0.9];
       A.map.addSource(HEX, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
@@ -534,7 +542,6 @@
           active = false; A.set3D(false);
           if (A.layers.timeline) return fallback("這個瀏覽器無法顯示 3D 地形，");
         }
-        A.map.setLayoutProperty("base", "visibility", "none");
         applyTheme();
         [HEX].concat(pillarIds()).forEach(function (id) { A.map.setLayoutProperty(id, "visibility", "visible"); });
         showLabels(true); zoomClass();
@@ -562,7 +569,6 @@
       stopOrbit(); stopGrow(); stopTour(); showLabels(false);
       if (level) { level = 0; refreshVis(); }
       ownLayers().forEach(function (id) { A.map.setLayoutProperty(id, "visibility", "none"); });
-      A.map.setLayoutProperty("base", "visibility", "visible");
       A.map.setPaintProperty("bg", "background-color", A.dark() ? "#17130f" : "#efe7d8");
       A.map.getContainer().classList.remove("is-near");
       A.map.setTerrain(null);
