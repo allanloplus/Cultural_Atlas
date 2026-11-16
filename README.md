@@ -167,6 +167,10 @@ python3 tools/build_relief.py
 3. 在 `data/layers.json` 加一筆。圖層有兩個以上時，頂端列會自動出現切換分頁；排第一個且啟用的圖層是首頁。
 4. 立體圖層在 `enter` 呼叫 `Atlas.set3D(true)`、`leave` 呼叫 `Atlas.set3D(false)`（平面圖層不開放旋轉與傾斜）。要在 3D 文資島多一種光柱顏色，在 `island.js` 的 `MODES` 加一筆即可。
 
+## 分享預覽圖
+
+連結貼到通訊軟體時顯示的縮圖是 `assets/og.jpg`（1200×630），原稿在 `tools/og.html`：右邊的臺灣是用 `data/sites.json` 的座標點出來的。要重做時在 repo 根目錄開本機伺服器，用瀏覽器以 1200×630 開啟 `tools/og.html` 後截圖存檔。
+
 ## 本機預覽
 
 ```bash
