@@ -4,7 +4,8 @@
  * 畫法：遠看（縮放 9.6 級以下）是六角聚合柱，高度＝格內處數；拉近後是每處一根，高度分三級
  *       （國定古蹟最高；直轄市定、縣市定古蹟次之；其餘最低）。顏色可切換類別、年代、海拔、地震、風險。
  *       地震、風險直接用「臺灣挺過了什麼」「臺灣文資風險地圖」的資料與算法；那兩個圖層沒啟用時，切換鈕不出現。
- * 另有「島怎麼長出來」（依創建年長出柱子的動畫）與「導覽」（由資料算出事實的 8 站巡禮）。
+ * 另有「島怎麼長出來」（依創建年長出柱子的動畫）與「導覽」（由資料算出事實的 8 站巡禮），兩者都有 Allan 與阿拉蕾的語音旁白
+ *   （data/narration/，tools/build_narration.py；劇本的數字與 STOPS 的算法要一致，改了這裡的算法也要改那支腳本）。
  * 網址：#island/<cat|era|elev|quake|risk>
  * 新增一種顏色：在 MODES 加一筆；新增一站導覽：在 STOPS 加一筆。
  */
@@ -215,6 +216,36 @@
   function fly(cam) { A.map.stop(); if (reduced.matches) A.map.jumpTo(cam); else A.map.flyTo(Object.assign({ duration: 3200, essential: false }, cam)); }
   function interrupt() { stopOrbit(); }
 
+  /* ---------- 旁白（Allan × 阿拉蕾，assets/js/narration.js） ---------- */
+  var N = window.Narration, narrOK = false, advTimer = null;
+  function voiceOn() { return narrOK && N.on(); }
+  function sayLine(el, l) {
+    if (!el) return;
+    var C = window.Characters, name = l.who === "R" ? "阿拉蕾" : "Allan";
+    el.hidden = false; el.dataset.who = l.who;
+    el.innerHTML = (C ? '<img src="' + C.face(l.who, C.mood(l.who, l.text)) + '" alt="" width="44" height="44">' : "") + "<p><b>" + name + "</b>" + esc(l.text) + "</p>";
+  }
+  function voiceBtn() { return '<button type="button" class="is-voice" aria-pressed="' + N.on() + '" aria-label="旁白聲音" title="旁白聲音"' + (narrOK ? "" : " hidden") + ">" + (N.on() ? "🔊" : "🔇") + "</button>"; }
+  function setVoice(v) {
+    N.set(v);
+    Array.prototype.forEach.call(document.querySelectorAll(".is-voice"), function (b) { b.setAttribute("aria-pressed", String(v)); b.textContent = v ? "🔊" : "🔇"; });
+    if (!v) { clearTimeout(advTimer); var c = document.getElementById("isTour"); if (c) c.classList.remove("talking"); ["isTourSay", "isGrowSay"].forEach(function (id) { var e = document.getElementById(id); if (e) e.hidden = true; }); }
+    else if (tour) goStop(tour.k);
+  }
+  function bindVoice(root) { Array.prototype.forEach.call(root.querySelectorAll(".is-voice"), function (b) { b.onclick = function () { setVoice(!N.on()); }; }); }
+  /* 首頁的開場邀請 */
+  function showInvite() {
+    if (ss("atlas-invite-off") || document.getElementById("isInvite")) return;
+    var C = window.Characters, el = document.createElement("div");
+    el.id = "isInvite"; el.className = "is-invite";
+    el.innerHTML = (C ? '<img src="' + C.face("A", "smile") + '" alt="" width="40" height="40"><img src="' + C.face("R", "laugh") + '" alt="" width="40" height="40">' : "") +
+      "<p><b>Allan 和阿拉蕾</b>帶你用 8 站逛文資島" + (narrOK ? "（有聲音）" : "") + '</p><button type="button" class="go">▶ 開始導覽</button><button type="button" class="x" aria-label="關閉">×</button>';
+    A.map.getContainer().parentNode.appendChild(el);
+    el.querySelector(".go").onclick = function () { hideInvite(); startTour(); };
+    el.querySelector(".x").onclick = function () { ss("atlas-invite-off", "1"); hideInvite(); };
+  }
+  function hideInvite() { var el = document.getElementById("isInvite"); if (el) el.remove(); }
+
   /* ---------- 島怎麼長出來 ---------- */
   /* 柱子是否顯示：「島怎麼長出來」的年份與「海拔」的拉桿都會篩選 */
   function vis(s) { return (year == null || s.year <= year) && (!level || !elev || elev.h[s.i] >= level); }
@@ -234,36 +265,44 @@
   function yearBox(y) {
     var box = document.getElementById("isYear");
     if (y == null) { if (box) box.remove(); return; }
-    if (!box) { box = document.createElement("div"); box.id = "isYear"; box.className = "is-year"; box.setAttribute("aria-live", "off"); A.map.getContainer().parentNode.appendChild(box); }
+    if (!box) { box = document.createElement("div"); box.id = "isYear"; box.className = "is-year"; box.setAttribute("aria-live", "off"); box.innerHTML = '<div class="yy"></div><div class="is-say" id="isGrowSay" hidden></div>'; A.map.getContainer().parentNode.appendChild(box); }
     var e = A.eras.filter(function (x) { return !x.from || y >= x.from; }).pop(), ms = MILESTONES.filter(function (m) { return y >= m[0]; }).pop();
     var n = A.sites.filter(function (s) { return s.year <= y; }).length;
     box.style.setProperty("--c", e.color);
-    box.innerHTML = "<b>" + Math.floor(y) + "</b><span>" + e.name + "</span><small>已出現 " + fmt(n) + " 處" + (ms && y - ms[0] < 40 ? "・" + ms[0] + " " + esc(ms[1]) : "") + "</small>";
+    box.querySelector(".yy").innerHTML = "<b>" + Math.floor(y) + "</b><span>" + e.name + "</span><small>已出現 " + fmt(n) + " 處" + (ms && y - ms[0] < 40 ? "・" + ms[0] + " " + esc(ms[1]) : "") + "</small>";
   }
   function stopGrow(done) {
     if (!grow) return;
-    cancelAnimationFrame(grow.raf); grow = null;
+    cancelAnimationFrame(grow.raf); grow = null; N.stop();
     setYear(null); yearBox(null);
     A.map.getSource(HEX).setData(hexData());
     var b = document.getElementById("isGrow"); if (b) { b.setAttribute("aria-pressed", "false"); b.textContent = "▶ 島怎麼長出來"; }
     if (done) say("播放完畢：" + fmt(A.sites.length) + " 處文資都長出來了。", 5000);
   }
   function startGrow() {
-    stopTour(); stopOrbit(); A.hideCard();
+    stopTour(); stopOrbit(); A.hideCard(); hideInvite();
     if (mode !== "era") { mode = "era"; level = 0; A.setHash("island/era"); show(); }
     fly(homeCam());
-    var t0 = performance.now() + dur(1200), last = 0, b0 = VIEW.bearing;
+    var prog = -dur(1200), prev = performance.now(), last = 0, b0 = VIEW.bearing, hold = false, segs = [];
+    if (voiceOn()) N.track("grow").lines.forEach(function (l, k) { if (l.at != null || !segs.length) segs.push({ at: l.at || GROW.from, from: k, to: k }); else segs[segs.length - 1].to = k; });
     grow = { raf: 0 };
     setYear(GROW.from); yearBox(GROW.from); A.map.getSource(HEX).setData(hexData());
     var b = document.getElementById("isGrow"); if (b) { b.setAttribute("aria-pressed", "true"); b.textContent = "■ 停止播放"; }
     (function step(now) {
       if (!grow) return;
-      var t = Math.max(0, Math.min(1, (now - t0) / GROW.ms)), y = GROW.from + (GROW.to - GROW.from) * t;
+      if (!hold) prog += now - prev;
+      prev = now;
+      var t = Math.max(0, Math.min(1, prog / GROW.ms)), y = GROW.from + (GROW.to - GROW.from) * t;
+      if (!hold && segs.length && y >= segs[0].at && prog >= 0) {      /* 到了旁白的節點：停住，講完再繼續 */
+        var sg = segs.shift();
+        y = Math.max(GROW.from, Math.min(GROW.to, sg.at)); prog = (y - GROW.from) / (GROW.to - GROW.from) * GROW.ms; t = prog / GROW.ms; hold = true; last = 0;
+        N.play("grow", { from: sg.from, to: sg.to, onLine: function (k, l) { sayLine(document.getElementById("isGrowSay"), l); }, onEnd: function () { hold = false; prev = performance.now(); } });
+      }
       if (now - last > 120 || t >= 1) {
         last = now; setYear(y); yearBox(y); A.map.getSource(HEX).setData(hexData());
         if (!reduced.matches && t > 0 && !A.map.isMoving()) A.map.setBearing(b0 + 40 * t);
       }
-      if (t >= 1) return stopGrow(true);
+      if (t >= 1 && !hold && !segs.length) return stopGrow(true);
       grow.raf = requestAnimationFrame(step);
     })(performance.now());
   }
@@ -280,9 +319,10 @@
         return "臺灣本島的陸地有 " + Math.round(elev.landShare.over500 * 100) + "% 在海拔 500 公尺以上，但 " + fmt(A.sites.length) + " 處文資只有 <b>" + hi + " 處</b>（" + (hi / A.sites.length * 100).toFixed(1) +
           "%）在 500 公尺以上，一半位在海拔 <b>" + med + " 公尺</b>以下。文資跟著人走：沿海、平原、河口。";
       } },
-    { title: "府城：四個時代疊在一起", mode: "era", cam: function () { return { center: [120.2025, 22.993], zoom: 13.4, pitch: 62, bearing: 35 }; },
-      text: function () {
-        var L = near({ lat: 22.9975, lng: 120.2025 }, 1), t = tally(L, function (s) { return s.era; });
+    { title: function (d) { return "府城：" + "零一二三四五六"[Object.keys(d.t).length] + "個時代疊在一起"; }, mode: "era", cam: function () { return { center: [120.2025, 22.993], zoom: 13.4, pitch: 62, bearing: 35 }; },
+      prep: function () { var L = near({ lat: 22.9975, lng: 120.2025 }, 1); return { L: L, t: tally(L, function (s) { return s.era; }) }; },
+      text: function (d) {
+        var L = d.L, t = d.t;
         return "赤嵌樓周邊一公里內有 <b>" + L.length + " 處</b>文資，" + Object.keys(t).sort().map(function (k) { return A.eras[k].name + " " + t[k] + " 處"; }).join("、") +
           "。1624 年荷蘭人到大員之後，這裡是臺灣最早的城市。";
       } },
@@ -337,16 +377,16 @@
   ];
   function stopTour() {
     if (!tour) return;
-    tour = null;
+    tour = null; clearTimeout(advTimer); N.stop();
     var el = document.getElementById("isTour"); if (el) el.remove();
     var b = document.getElementById("isTourBtn"); if (b) b.setAttribute("aria-pressed", "false");
     if (A.panel.classList.contains("is-touring")) { A.panel.classList.remove("is-touring"); A.map.resize(); }
   }
-  function startTour() { stopGrow(); stopOrbit(); A.hideCard(); tour = { k: 0 }; goStop(0); var b = document.getElementById("isTourBtn"); if (b) b.setAttribute("aria-pressed", "true"); }
+  function startTour() { stopGrow(); stopOrbit(); A.hideCard(); hideInvite(); tour = { k: 0 }; goStop(0); var b = document.getElementById("isTourBtn"); if (b) b.setAttribute("aria-pressed", "true"); }
   function goStop(k) {
     var list = STOPS.filter(function (s) { return !s.need || s.need(); });
     k = Math.max(0, Math.min(list.length - 1, k));
-    tour = { k: k };
+    tour = { k: k }; clearTimeout(advTimer); N.stop();
     var S = list[k], el;
     Promise.all([loadMode(S.mode), elevP]).then(function () {
       if (!tour || tour.k !== k) return;
@@ -358,13 +398,26 @@
       var home = narrow.matches ? A.panel : A.map.getContainer().parentNode;
       if (el.parentNode !== home) home.appendChild(el);
       if (narrow.matches !== A.panel.classList.contains("is-touring")) { A.panel.classList.toggle("is-touring", narrow.matches); A.map.resize(); }
-      el.innerHTML = '<p class="is-tour-k">導覽 ' + (k + 1) + "／" + list.length + (S.tag ? '　<span class="sv-tag">' + S.tag + "</span>" : "") + '</p><h3>' + esc(S.title) + "</h3><p>" + S.text(d) + "</p>" +
-        '<div class="is-tour-nav"><button type="button" data-d="-1"' + (k ? "" : " disabled") + '>‹ 上一站</button><button type="button" data-d="0">結束</button>' +
+      el.innerHTML = '<p class="is-tour-k">導覽 ' + (k + 1) + "／" + list.length + (S.tag ? '　<span class="sv-tag">' + S.tag + "</span>" : "") + '</p><h3>' + esc(typeof S.title === "function" ? S.title(d) : S.title) + "</h3>" +
+        '<div class="is-say" id="isTourSay" hidden></div><p class="is-fact">' + S.text(d) + "</p>" +
+        '<div class="is-tour-nav">' + voiceBtn() + '<button type="button" data-d="-1"' + (k ? "" : " disabled") + '>‹ 上一站</button><button type="button" data-d="0">結束</button>' +
         '<button type="button" data-d="1" class="go"' + (k < list.length - 1 ? "" : " disabled") + ">下一站 ›</button></div>";
-      Array.prototype.forEach.call(el.querySelectorAll("button"), function (b) {
+      Array.prototype.forEach.call(el.querySelectorAll("button[data-d]"), function (b) {
         b.onclick = function () { var dd = +b.dataset.d; if (!dd) stopTour(); else goStop(k + dd); };
       });
+      bindVoice(el);
       fly(S.cam(d));
+      el.classList.remove("talking");
+      if (voiceOn()) {                    /* 旁白：講完自動到下一站 */
+        el.classList.add("talking");
+        N.play("tour" + (STOPS.indexOf(S) + 1), {
+          onLine: function (_, l) { sayLine(document.getElementById("isTourSay"), l); },
+          onEnd: function () {
+            el.classList.remove("talking");
+            if (tour && tour.k === k && k < list.length - 1 && voiceOn()) advTimer = setTimeout(function () { if (tour && tour.k === k) goStop(k + 1); }, 1500);
+          }
+        });
+      }
     });
   }
 
@@ -413,7 +466,7 @@
       (mode === "elev" ? '<div class="is-lv"><label for="isLv">只看海拔 <b id="isLvV">' + fmt(level) + '</b> 公尺以上</label><input type="range" id="isLv" min="0" max="2400" step="50" value="' + level + '"><span id="isLvN"></span></div>' : "") +
       '<div class="is-acts"><button type="button" class="is-main" id="isGrow" aria-pressed="' + !!grow + '">' + (grow ? "■ 停止播放" : "▶ 島怎麼長出來") + "</button>" +
       '<button type="button" class="is-main" id="isTourBtn" aria-pressed="' + !!tour + '">導覽 ' + STOPS.length + " 站</button>" +
-      '<span class="is-cam" role="group" aria-label="鏡頭">' +
+      '<span class="is-cam" role="group" aria-label="鏡頭">' + voiceBtn() +
       '<button type="button" data-cam="left" aria-label="向左轉" title="向左轉">↺</button>' +
       '<button type="button" data-cam="right" aria-label="向右轉" title="向右轉">↻</button>' +
       '<button type="button" data-cam="tilt" title="切換俯視與斜看">' + (A.map.getPitch() > 20 ? "俯視" : "斜看") + "</button>" +
@@ -429,6 +482,7 @@
     if (lv) { lv.oninput = function () { stopGrow(); setLevel(+lv.value); }; setLevel(level); }
     document.getElementById("isSpin").onclick = function () { if (orbit) stopOrbit(); else { stopGrow(); stopTour(); startOrbit(); } };
     document.getElementById("isGrow").onclick = function () { if (grow) stopGrow(); else startGrow(); };
+    bindVoice(A.panel);
     document.getElementById("isTourBtn").onclick = function () { if (tour) stopTour(); else startTour(); };
     Array.prototype.forEach.call(A.panel.querySelectorAll("[data-cam]"), function (b) {
       b.onclick = function () {
@@ -486,13 +540,14 @@
     render(counts); about();
   }
 
-  var elevP = null;
+  var elevP = null, narrP = Promise.resolve(false);
   A.registerLayer({
     id: "island",
     pick: pillarIds(),
     cardExtra: function (s) { return cardExtra(s); },
     init: function () {
       var base = location.href.replace(/[#?].*$/, "").replace(/[^\/]*$/, "");
+      narrP = N ? N.ready() : narrP;
       elevP = fetch("data/terrain/sites-elev.json").then(function (r) { return r.json(); }).then(function (d) { elev = d; });
       A.map.addSource(DEM, { type: "raster-dem", tiles: [base + "data/terrain/{z}/{x}/{y}.png"], encoding: "terrarium", tileSize: TERRAIN.tileSize, minzoom: TERRAIN.minzoom, maxzoom: TERRAIN.maxzoom, bounds: TERRAIN.bounds, attribution: "地形：" + DEM_NOTICE });
       ["light", "dark"].forEach(function (t) {
@@ -548,6 +603,7 @@
         if (!entered) {                       /* 進站：全島視角，慢慢環繞一圈 */
           entered = true;
           homeView();
+          narrP.then(function (ok) { narrOK = ok; if (active && !tour && !grow) { showInvite(); if (ok) show(); } });
           if (!reduced.matches) startOrbit();
         } else {
           A.map.stop();
@@ -566,7 +622,7 @@
     },
     leave: function () {
       active = false;
-      stopOrbit(); stopGrow(); stopTour(); showLabels(false);
+      stopOrbit(); stopGrow(); stopTour(); showLabels(false); hideInvite();
       if (level) { level = 0; refreshVis(); }
       ownLayers().forEach(function (id) { A.map.setLayoutProperty(id, "visibility", "none"); });
       A.map.setPaintProperty("bg", "background-color", A.dark() ? "#17130f" : "#efe7d8");

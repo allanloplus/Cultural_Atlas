@@ -253,3 +253,29 @@ button, input, select { font: inherit; color: inherit; }
   .topbar-inner { flex-wrap: wrap; align-content: center; gap: 4px 8px; }
   .layer-tabs { order: 3; flex: 1 0 100%; }
 }
+
+/* 3D 文資島：旁白（Allan × 阿拉蕾） */
+.is-say { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+.is-say img { flex: none; width: 44px; height: 44px; border-radius: 50%; object-fit: cover; object-position: top; background: var(--paper-2); border: 2px solid var(--line); }
+.is-say[data-who="A"] img { border-color: var(--teal); }
+.is-say[data-who="R"] img { border-color: var(--peach); }
+.is-say p { background: var(--paper); border: 1px solid var(--line); border-radius: 4px 12px 12px 12px; padding: 6px 10px; font-size: .9rem; line-height: 1.6; }
+.is-say p b { display: block; font-size: .72rem; color: var(--muted); }
+.is-tour .is-fact { font-size: .86rem; color: var(--muted); }
+.is-tour-nav .is-voice, .is-cam .is-voice { flex: 0 0 auto; min-width: 40px; }
+.is-year .is-say { width: min(440px, calc(100vw - 40px)); margin: 8px auto 0; text-align: left; text-shadow: none; }
+.is-year .is-say p { box-shadow: var(--shadow); background: var(--card); color: var(--ink); }
+.is-invite { position: absolute; z-index: 5; left: 10px; bottom: 34px; display: flex; align-items: center; gap: 6px; max-width: calc(100% - 20px); background: color-mix(in srgb, var(--card) 96%, transparent); border: 1px solid var(--line); border-radius: 999px; padding: 5px 6px 5px 6px; box-shadow: var(--shadow-lg); font-size: .88rem; }
+.is-invite img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; object-position: top; background: var(--paper-2); }
+.is-invite img + img { margin-left: -14px; }
+.is-invite p { line-height: 1.35; }
+.is-invite p b { display: block; }
+.is-invite .go { white-space: nowrap; border: 0; border-radius: 999px; background: var(--teal); color: var(--teal-ink); font-weight: 700; padding: 7px 14px; cursor: pointer; }
+.is-invite .x { border: 0; background: none; color: var(--muted); font-size: 1.2rem; width: 30px; height: 30px; cursor: pointer; }
+@media (max-width: 720px) {
+  .panel .is-tour.talking .is-fact { display: none; }     /* 手機：講話時只看字幕，事實文字在不講話時顯示 */
+  .is-say p { font-size: .86rem; }
+  .is-year .is-say { width: calc(100vw - 24px); }
+  .is-year .is-say p { font-size: .8rem; }
+  .is-invite { left: 8px; right: 8px; bottom: 8px; border-radius: 16px; font-size: .82rem; }
+}

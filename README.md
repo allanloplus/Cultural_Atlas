@@ -21,6 +21,7 @@
 - 「島怎麼長出來」：從 1550 年播到今天，柱子依創建年長出來，畫面上方顯示年份、時代與歷史節點。
 - 「導覽 8 站」：每站的事實都在網頁上由資料即時算出（文資的海拔分布、府城、最密的一平方公里、阿里山、東部、集集地震、金門、最孤單的文資）。文資增減後數字會自動更新，但站點的鏡頭位置與說明文字是寫死的，見 `island.js` 的 `STOPS`。
 - 「海拔」顏色：文資所在位置的推估海拔（5 級），圖例對照文資與本島陸地落在各高度的比例（例如陸地 47% 在 500 公尺以上，文資只有 1.7%），附海拔最高的 10 處；拉桿可只看某個高度以上的文資。卡片上也會顯示推估海拔。陡坡上的座標標為「海拔不確定」。
+- 語音旁白：導覽 8 站與「島怎麼長出來」都有 Allan 和阿拉蕾的雙人對話（聲音、角色圖、表情規則與知識網站相同），畫面上有角色頭像與字幕。導覽講完一站自動到下一站；「島怎麼長出來」播到 1624、1662、1684、1875、1895、1946、1982 年等節點會停下來講，講完再繼續。🔊 按鈕可關掉聲音（記在瀏覽器裡）。首頁左下角有「Allan 和阿拉蕾帶你用 8 站逛文資島」的邀請；瀏覽器不允許網頁自己出聲，所以要按了才開始。
 - 單根柱子的高度分三級，只代表等級：國定古蹟最高；直轄市定、縣市定古蹟次之；其餘（歷史建築、紀念建築、聚落建築群、文化景觀、考古遺址）最低。
 - 顏色可切換：類別（預設）、年代、地震（歷來最大推估震度）、風險（災害潛勢標籤數）。換顏色時柱高不變；每種顏色附「看完整圖層」連到對應的平面分頁。地震與風險直接用下面兩個圖層的資料與算法，並保留「推估」「僅供防災參考」的標示。
 - 進站會慢慢環繞一圈，碰一下就停；系統設定「減少動態效果」時不轉。面板上有向左轉、向右轉、俯視／斜看、全島、環繞一圈的按鈕，手機不用手勢也能操作。
@@ -79,6 +80,10 @@ tools/build_survived.py     產生 data/survived.json
 tools/build_risk.py         產生 data/risk.json、data/risk-lines.geojson
 tools/build_terrain.py      產生 data/terrain/
 tools/build_relief.py       產生 data/relief/（要先跑過 build_terrain.py 下載 DEM）
+tools/build_narration.py    產生 data/narration/（語音旁白的劇本與 mp3）
+assets/js/narration.js      語音旁白播放器
+assets/js/characters.js     Allan 與阿拉蕾的角色與表情規則（複製自知識網站，兩邊要一起改）
+assets/characters/          角色表情圖（複製自知識網站）
 reports/coord-check.csv     座標檢查清單（build_terrain.py 產生，給知識網站校對用）
 ```
 
@@ -160,6 +165,24 @@ python3 tools/build_relief.py
 - 柱子的粗細、三級高度、六角格大小、切換縮放級、誇大倍數、環繞一圈與播放的時間、效能門檻，都是 `island.js` 開頭的常數。
 - 曾試過自己寫 WebGL 圖層畫發光的光束，但 MapLibre 4.7.1 開地形時，自繪圖層在山區對不齊地形，而且不能點選，所以沿用 fill-extrusion。
 
+### 更新語音旁白
+
+```bash
+pip install edge-tts
+```
+
+```bash
+TTS_CA_BUNDLE=/root/.ccr/ca-bundle.crt python3 tools/build_narration.py
+```
+
+（`TTS_CA_BUNDLE` 只有經過企業代理、需要指定憑證時才要設；一般電腦直接執行即可。需要 ffmpeg。）
+
+- 劇本寫在腳本的 `script()` 裡，數字由資料算出，算法和 `island.js` 導覽（`STOPS`）相同；改了其中一邊的算法，另一邊也要改。
+- `data/sites.json`、`data/terrain/sites-elev.json`、`data/survived.json` 有變動就要重跑。網頁會比對 `script.json` 記錄的文資資料日期與處數，不一致時不播語音（避免講出過時的數字），只顯示文字。
+- 聲音設定與知識網站的 `tools/gen_audio.py` 相同（Allan：zh-TW-YunJheNeural；阿拉蕾：zh-TW-HsiaoYuNeural 提高音調）。只重新合成文字有變動的句子，快取在 `.cache/tts/`。
+- 某段文字改了但語音沒重新產生時，播放器改用瀏覽器內建語音。
+- 目前 9 段、約 7.5 分鐘、1.7 MB。
+
 ### 新增圖層
 
 1. 在 `tools/` 寫建置腳本，輸出以文資 id 為鍵的 JSON 到 `data/`。
@@ -183,7 +206,7 @@ python3 -m http.server 8000
 
 GitHub Pages：Settings → Pages → Deploy from a branch，選 `main` 與 `/ (root)`。自訂網域寫在 `CNAME`（`cultural-atlas.123hi.org`），DNS 需要一筆 CNAME 記錄指向 `allanloplus.github.io`。開發在工作分支進行，合併到 `main` 才上線。
 
-GitHub Pages 每個網站上限 1 GB。本站不放照片與語音，目前約 8.6 MB（其中地形與底圖圖磚約 5.3 MB）；之後加入圖資時，要在建置腳本裡先簡化再輸出，並在這裡記錄用量。
+GitHub Pages 每個網站上限 1 GB。本站不放照片與語音，目前約 11 MB（其中地形與底圖圖磚約 5.3 MB、語音旁白 1.7 MB、角色圖 0.5 MB）；之後加入圖資時，要在建置腳本裡先簡化再輸出，並在這裡記錄用量。
 
 ## 資料來源與授權
 
