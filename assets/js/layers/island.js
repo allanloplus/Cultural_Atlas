@@ -40,7 +40,8 @@
 
   var mode = "cat", cls = [], ks = [], rings = null, hexes = null, elev = null, entered = false, active = false, orbit = null, checked = false, toast = null;
   var grow = null, tour = null, labels = [], year = null;
-  var narrow = window.matchMedia("(max-width: 720px)");   /* 手機：導覽卡片放在下方面板，不蓋住地圖 */
+  var narrow = { matches: true };   /* 導覽卡片與對話一律放在下方面板，不蓋住地圖（桌機、手機都一樣） */
+  var narrowScreen = window.matchMedia("(max-width: 720px)");
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)"), coarse = window.matchMedia("(pointer: coarse)");
 
   function ss(k, v) { try { if (v === undefined) return sessionStorage.getItem(k); sessionStorage.setItem(k, v); } catch (e) { return null; } }
@@ -169,8 +170,14 @@
   }
   function pillarIds() { return BANDS.map(function (z) { return PILLAR + z; }); }
   function ownLayers() { return [RELIEF + "light", RELIEF + "dark", HEX].concat(pillarIds()); }
+  /* 通用電子地圖只在拉近到街區時出現，遠看時不會從紙雕底圖的範圍外露出來 */
+  function baseFade(on) {
+    var op = A.dark() ? 0.75 : 0.8;    /* 同 core.js 的 basePaint */
+    A.map.setPaintProperty("base", "raster-opacity", on ? ["interpolate", ["linear"], ["zoom"], 11.2, 0, 11.9, op] : op);
+  }
   function applyTheme() {
     var t = theme();
+    if (active) baseFade(true);
     A.map.setLayoutProperty(RELIEF + "light", "visibility", active && t === "light" ? "visible" : "none");
     A.map.setLayoutProperty(RELIEF + "dark", "visibility", active && t === "dark" ? "visible" : "none");
     if (active) A.map.setPaintProperty("bg", "background-color", SEA[t]);
@@ -265,7 +272,7 @@
   function yearBox(y) {
     var box = document.getElementById("isYear");
     if (y == null) { if (box) box.remove(); return; }
-    if (!box) { box = document.createElement("div"); box.id = "isYear"; box.className = "is-year"; box.setAttribute("aria-live", "off"); box.innerHTML = '<div class="yy"></div><div class="is-say" id="isGrowSay" hidden></div>'; A.map.getContainer().parentNode.appendChild(box); }
+    if (!box) { box = document.createElement("div"); box.id = "isYear"; box.className = "is-year"; box.setAttribute("aria-live", "off"); box.innerHTML = '<div class="yy"></div>'; A.map.getContainer().parentNode.appendChild(box); }
     var e = A.eras.filter(function (x) { return !x.from || y >= x.from; }).pop(), ms = MILESTONES.filter(function (m) { return y >= m[0]; }).pop();
     var n = A.sites.filter(function (s) { return s.year <= y; }).length;
     box.style.setProperty("--c", e.color);
@@ -274,6 +281,7 @@
   function stopGrow(done) {
     if (!grow) return;
     cancelAnimationFrame(grow.raf); grow = null; N.stop();
+    var gs = document.getElementById("isGrowSay"); if (gs) gs.hidden = true;
     setYear(null); yearBox(null);
     A.map.getSource(HEX).setData(hexData());
     var b = document.getElementById("isGrow"); if (b) { b.setAttribute("aria-pressed", "false"); b.textContent = "▶ 島怎麼長出來"; }
@@ -282,7 +290,8 @@
   function startGrow() {
     stopTour(); stopOrbit(); A.hideCard(); hideInvite();
     if (mode !== "era") { mode = "era"; level = 0; A.setHash("island/era"); show(); }
-    fly(homeCam());
+    var cam = A.map.cameraForBounds(VIEW.bounds, { padding: { top: narrowScreen.matches ? 100 : 130, bottom: 16, left: 20, right: 20 } });   /* 島往下移，上方留給年份 */
+    fly({ center: cam.center, zoom: cam.zoom, pitch: VIEW.pitch, bearing: VIEW.bearing });
     var prog = -dur(1200), prev = performance.now(), last = 0, b0 = VIEW.bearing, hold = false, segs = [];
     if (voiceOn()) N.track("grow").lines.forEach(function (l, k) { if (l.at != null || !segs.length) segs.push({ at: l.at || GROW.from, from: k, to: k }); else segs[segs.length - 1].to = k; });
     grow = { raf: 0 };
@@ -472,6 +481,7 @@
       '<button type="button" data-cam="tilt" title="切換俯視與斜看">' + (A.map.getPitch() > 20 ? "俯視" : "斜看") + "</button>" +
       '<button type="button" data-cam="home" title="回到全島">全島</button>' +
       '<button type="button" id="isSpin" aria-pressed="' + !!orbit + '">環繞</button></span></div>' +
+      '<div class="is-say" id="isGrowSay" hidden></div>' +
       '<p class="tl-cap is-cap"><span class="is-intro"><b>3D 文資島</b>　' + fmt(A.sites.length) + " 處文化資產。遠看是六角柱，高度是約 6 公里格子內的處數；拉近後變成每處一根，越高等級越高。</span>" + M.cap +
       '<span class="sv-method">' + (coarse.matches ? "單指拖曳平移，兩指張合縮放、轉動旋轉、一起上下滑傾斜；點六角柱拉近，點柱子看介紹。" : "拖曳平移，按住右鍵或 Ctrl 拖曳可旋轉與傾斜；點六角柱拉近，點柱子看介紹。") + "地形高度誇大 " + EXAGGERATION + " 倍。</span></p>";
     Array.prototype.forEach.call(A.panel.querySelectorAll(".seg button"), function (b) {
@@ -628,6 +638,7 @@
       A.map.setPaintProperty("bg", "background-color", A.dark() ? "#17130f" : "#efe7d8");
       A.map.getContainer().classList.remove("is-near");
       A.map.setTerrain(null);
+      baseFade(false);
       A.set3D(false);
     },
     theme: function () { if (active) applyTheme(); }
