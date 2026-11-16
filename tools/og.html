@@ -1,0 +1,44 @@
+<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8">
+<!-- 分享連結時的預覽圖（1200×630）原稿：在 repo 根目錄開本機伺服器，用瀏覽器以 1200×630 開啟這一頁後截圖，存成 assets/og.jpg -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:1200px;height:630px;overflow:hidden;background:#f6f1e7;font-family:"Noto Sans TC",sans-serif;color:#2b2521;position:relative}
+.bg{position:absolute;inset:0;background:radial-gradient(700px 420px at 88% 8%,#cfe8dd,transparent 70%),radial-gradient(500px 300px at 0 100%,#f3dfc0,transparent 70%)}
+.k{position:absolute;left:64px;top:52px;font-size:24px;font-weight:700;letter-spacing:.14em;color:#1d6f73;display:flex;align-items:center;gap:14px}
+.k img{width:48px;height:48px;border-radius:12px}
+h1{position:absolute;left:62px;top:124px;font-family:"LXGW WenKai TC",serif;font-weight:700;font-size:104px;line-height:1.2;letter-spacing:.04em;white-space:nowrap}
+.sub{position:absolute;left:66px;top:268px;font-family:"LXGW WenKai TC",serif;font-size:34px;line-height:1.5;color:#1d6f73}
+.chips{position:absolute;left:64px;bottom:44px;display:flex;gap:12px}
+.chips span{background:#fffdf8;border:1.5px solid #e0d5c3;border-radius:999px;padding:6px 20px;font-size:24px;font-weight:500;box-shadow:0 4px 12px rgba(60,40,20,.08);white-space:nowrap}
+.url{position:absolute;right:56px;bottom:26px;font-size:21px;color:#6c6058;letter-spacing:.04em}
+.faces{position:absolute;display:flex;gap:12px}
+.faces img{width:120px;height:120px;border-radius:50%;object-fit:cover;object-position:50% 12%;background:#cfe8dd;border:6px solid #fffdf8;box-shadow:0 8px 20px rgba(40,25,10,.22)}
+.faces img+img{background:#f7e2a6}
+canvas{position:absolute;right:170px;top:14px}
+.lg{position:absolute;right:56px;top:70px;list-style:none;font-size:19px;line-height:1.9}
+.lg i{display:inline-block;width:13px;height:13px;border-radius:50%;margin-right:8px}
+</style></head><body><div class="bg"></div>
+<div class="k"><img src="../assets/icon.svg">Allan Lo 和你逛文化</div>
+<h1>文資地圖集</h1>
+<p class="sub">三千多處文化資產，<br>在地圖上看時間、災害與風險。</p>
+<div class="chips"><span>3D 文資島</span><span>年代時間軸</span><span>它挺過了什麼</span><span>風險地圖</span></div>
+<canvas id="c" width="424" height="550"></canvas>
+<ul class="lg" id="lg"></ul>
+<p class="url">cultural-atlas.123hi.org</p>
+<script>
+/* 右邊的臺灣是用 data/sites.json 的文資座標點出來的（只畫本島與澎湖），顏色是時代 */
+fetch("../data/sites.json").then(function (r) { return r.json(); }).then(function (d) {
+  var F = d.meta.fields, la = F.indexOf("lat"), lo = F.indexOf("lng"), er = F.indexOf("era");
+  var COL = ["#8a6a4a", "#b8860b", "#d9692b", "#b23a3a", "#1d6f73", "#3b6ea8"], NAME = ["史前與早期", "荷西", "明鄭", "清領", "日治", "戰後"];
+  var x = document.getElementById("c").getContext("2d"), W = 424, H = 550, x0 = 119.25, x1 = 122.1, y0 = 21.85, y1 = 25.35;
+  x.globalAlpha = .8;
+  d.sites.forEach(function (s) {
+    if (s[lo] < x0 || s[lo] > x1 || s[la] < y0 || s[la] > y1) return;
+    x.fillStyle = COL[s[er]]; x.beginPath(); x.arc((s[lo] - x0) / (x1 - x0) * W, H - (s[la] - y0) / (y1 - y0) * H, 4, 0, 7); x.fill();
+  });
+  document.getElementById("lg").innerHTML = [3, 4, 5].map(function (i) { return '<li><i style="background:' + COL[i] + '"></i>' + NAME[i] + "</li>"; }).join("");
+  document.fonts.ready.then(function () { document.body.dataset.ready = "1"; });
+});
+</script>
+</body></html>
