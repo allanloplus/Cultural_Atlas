@@ -35,6 +35,7 @@
 - 「公告日期」軸：1982 年《文化資產保存法》公布至今，顏色分類別，軌道上標出修法節點。
 - 點任何一處會開卡片，並連回知識網站的 `<縣市>/#map/<景點 id>`。
 - 網址可直接指定狀態：`#timeline/built/1895`、`#timeline/listed/2005-11`。
+- 「Allan 和阿拉蕾說故事」6 段：最老的文資、1624 大員、清領、日治、1982 立法、九二一之後的歷史建築。
 
 **它挺過了什麼（歷史地震與颱風）**：用創建年與位置對照 183 個災害地震與 1884 年以來的颱風路徑，推估每處文資經歷過什麼。
 
@@ -43,6 +44,7 @@
 - 卡片上有每處文資的一句經歷摘要。
 - **全部是推估，不是官方觀測**；方法、誤差與來源寫在頁面的「資料說明」。
 - 網址：`#survived/quake/cwa111`（集集地震）、`#survived/typhoon`。
+- 「Allan 和阿拉蕾說故事」6 段：歷來最大搖晃、1906 梅山、1999 集集、2024 花蓮、最常被搖的文資、颱風。每段都標「推估，不是官方觀測」。
 
 **文資風險地圖**：文資座標套疊政府公開的災害潛勢圖資。
 
@@ -52,6 +54,7 @@
 - 活動斷層的距離門檻是本站自訂的，不是法定地質敏感區。
 - 沒有土壤液化：目前沒有可穩定下載的全臺向量檔。
 - 網址：`#risk`、`#risk/flood/1`、`#risk/fault`、`#risk/debris`、`#risk/landslide`。
+- 「Allan 和阿拉蕾說故事」5 段：綜合、淹水、活動斷層、土石流、大規模崩塌。每段都標「圖資套疊，僅供防災參考」，淹水那段保留不得作為土地使用管制依據的說明。
 
 目前的套疊結果（2026 年 11 月）：24 小時 350／500／650 毫米情境下淹水 0.5 公尺以上的文資 51／122／242 處；距活動斷層 500 公尺內 178 處；土石流 30 處；大規模崩塌 3 處。
 
@@ -82,6 +85,7 @@ tools/build_terrain.py      產生 data/terrain/
 tools/build_relief.py       產生 data/relief/（要先跑過 build_terrain.py 下載 DEM）
 tools/build_narration.py    產生 data/narration/（語音旁白的劇本與 mp3）
 assets/js/narration.js      語音旁白播放器
+assets/js/story.js          平面分頁的「Allan 和阿拉蕾說故事」（時間軸、挺過了什麼、風險地圖共用）
 assets/js/characters.js     Allan 與阿拉蕾的角色與表情規則（複製自知識網站，兩邊要一起改）
 assets/characters/          角色表情圖（複製自知識網站）
 reports/coord-check.csv     座標檢查清單（build_terrain.py 產生，給知識網站校對用）
@@ -177,8 +181,9 @@ TTS_CA_BUNDLE=/root/.ccr/ca-bundle.crt python3 tools/build_narration.py
 
 （`TTS_CA_BUNDLE` 只有經過企業代理、需要指定憑證時才要設；一般電腦直接執行即可。需要 ffmpeg。）
 
-- 劇本寫在腳本的 `script()` 裡，數字由資料算出，算法和 `island.js` 導覽（`STOPS`）相同；改了其中一邊的算法，另一邊也要改。
-- `data/sites.json`、`data/terrain/sites-elev.json`、`data/survived.json` 有變動就要重跑。網頁會比對 `script.json` 記錄的文資資料日期與處數，不一致時不播語音（避免講出過時的數字），只顯示文字。
+- 劇本寫在腳本的 `script()`（3D 文資島）與 `story_script()`（其他三個分頁的說故事）裡，數字由資料算出，算法和 `island.js` 的 `STOPS`、`timeline.js`／`survived.js`／`risk.js` 的 `STORY` 相同；改了其中一邊的算法，另一邊也要改。語音檔名：`tour1–8`、`grow`、`tl1–6`、`sv1–6`、`rk1–5`（第幾段）。
+- 說故事的卡片與對話放在下方面板，不蓋住地圖；每個分頁進入時左下角有邀請，按了才開始（瀏覽器不允許網頁自己出聲）。講完一段自動到下一段，🔊 可關聲音（四個分頁共用同一個設定）。
+- `data/sites.json`、`data/terrain/sites-elev.json`、`data/survived.json`、`data/risk.json` 有變動就要重跑。網頁會比對 `script.json` 記錄的文資資料日期與處數，不一致時不播語音（避免講出過時的數字），只顯示文字。
 - 聲音設定與知識網站的 `tools/gen_audio.py` 相同（Allan：zh-TW-YunJheNeural；阿拉蕾：zh-TW-HsiaoYuNeural 提高音調）。只重新合成文字有變動的句子，快取在 `.cache/tts/`。
 - 某段文字改了但語音沒重新產生時，播放器改用瀏覽器內建語音。
 - 目前 9 段、約 7.5 分鐘、1.7 MB。

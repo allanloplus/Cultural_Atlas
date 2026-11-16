@@ -1,6 +1,7 @@
 /* 圖層：臺灣是怎麼長出來的（時間軸動畫）
  * 兩條軸：built＝創建年（顏色分時代）、listed＝公告日期（顏色分類別）。只用 data/sites.json。
  * 網址：#timeline/built/1895、#timeline/listed/2005-11
+ * 「Allan 和阿拉蕾說故事」：STORY（assets/js/story.js）；劇本的數字由 tools/build_narration.py 用同樣的算法算出，改了這裡也要改那支腳本。
  */
 (function () {
   "use strict";
@@ -204,6 +205,69 @@
   }
   function saveHash() { A.setHash("timeline/" + mode + (pos >= axes[mode].max ? "" : "/" + axes[mode].toHash(pos))); }
 
+  /* 說故事時把時間慢慢推到指定位置（不是播放，所以不會一路播到最後） */
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+  function seek(m, p) {
+    if (m !== mode) setMode(m, 0);
+    stop();
+    var from = pos, to = Math.max(0, Math.min(axes[m].max, p)), t0 = performance.now(), D = reduced.matches ? 0 : 2600;
+    if (to < from) trail = to;
+    (function f(now) {
+      var t = D ? Math.min(1, (now - t0) / D) : 1;
+      pos = from + (to - from) * (1 - Math.pow(1 - t, 3));
+      trail += (pos - trail) * 0.12;
+      update();
+      if (t < 1) raf = requestAnimationFrame(f); else { trail = pos; update(); saveHash(); }
+    })(t0);
+  }
+
+  /* ---------- 說故事：每段的事實都由資料算出 ---------- */
+  function tally(list, f) { var t = {}; list.forEach(function (s) { var k = f(s); t[k] = (t[k] || 0) + 1; }); return t; }
+  function ranked(t) { return Object.keys(t).sort(function (a, b) { return t[b] - t[a] || (+a) - (+b); }); }   /* 同數時取編號小的（和建置腳本一致） */
+  function cname(k) { return A.counties[k].name; }
+  function catId(s) { return A.cats[s.cat].id; }
+  var ALL = { bounds: [[118.1, 21.8], [122.1, 26.4]] }, ISLAND = { bounds: [[119.2, 21.75], [122.3, 25.45]] };
+  function annM(y, m) { return (y - 1982) * 12 + m - 1 + 0.99; }
+  var STORY = [
+    { title: "最老的文資", prep: function () {
+        var o = A.sites.slice().sort(function (a, b) { return a.year - b.year || a.i - b.i; })[0], L = A.sites.filter(function (s) { return s.year < 1624; }), t = tally(L, function (s) { return s.county; }), k = ranked(t)[0];
+        return { o: o, n: L.length, c: cname(k), cn: t[k] };
+      },
+      apply: function () { seek("built", axes.built.fromHash("1623")); return ALL; },
+      text: function (d) { return "最早的是" + cname(d.o.county) + "的「" + esc(d.o.name) + "」，" + axes.built.label(axes.built.posOf(d.o)).text + "。1624 年以前的文資共 <b>" + d.n + " 處</b>，最多的在" + d.c + "（" + d.cn + " 處）。"; } },
+    { title: "1624：從大員開始", prep: function () {
+        var L = A.sites.filter(function (s) { return s.year >= 1624 && s.year <= 1661; }), t = tally(L, function (s) { return cname(s.county); });
+        return { all: A.sites.filter(function (s) { return s.year <= 1661; }).length, n: L.length, tn: t["臺南市"] || 0, km: t["金門縣"] || 0, nn: (t["基隆市"] || 0) + (t["新北市"] || 0) };
+      },
+      apply: function () { seek("built", axes.built.fromHash("1661")); return { center: [120.19, 22.995], zoom: 12 }; },
+      text: function (d) { return "到 1661 年，地圖上亮起 <b>" + d.all + " 處</b>。1624–1661 年間出現的 " + d.n + " 處裡，臺南 " + d.tn + " 處、金門 " + d.km + " 處、基隆與新北 " + d.nn + " 處。"; } },
+    { title: "清領：沿著西部平原長出來", prep: function () {
+        var L = A.sites.filter(function (s) { return s.year >= 1684 && s.year <= 1894; }), t = tally(L, function (s) { return s.county; });
+        return { all: A.sites.filter(function (s) { return s.year <= 1894; }).length, n: L.length, top: ranked(t).slice(0, 4).map(function (k) { return [cname(k), t[k]]; }) };
+      },
+      apply: function () { seek("built", axes.built.fromHash("1894")); return ALL; },
+      text: function (d) { return "到 1894 年共亮起 <b>" + fmt(d.all) + " 處</b>，清領時期的有 " + d.n + " 處，最多的是" + d.top.map(function (x) { return x[0] + " " + x[1] + " 處"; }).join("、") + "。"; } },
+    { title: "日治：一口氣蓋起來", prep: function () {
+        var L = A.sites.filter(function (s) { return A.eras[s.era].id === "japan"; });
+        return { all: A.sites.filter(function (s) { return s.year <= 1945; }).length, n: L.length, pct: Math.round(L.length / A.sites.length * 100), b: L.filter(function (s) { return catId(s) === "building"; }).length };
+      },
+      apply: function () { seek("built", axes.built.fromHash("1945")); return ISLAND; },
+      text: function (d) { return "日治時期的文資有 <b>" + fmt(d.n) + " 處</b>，占全部的 " + d.pct + "%，其中 " + fmt(d.b) + " 處是歷史建築。到 1945 年，地圖上已亮起 " + fmt(d.all) + " 處。"; } },
+    { title: "1982：文資有了法律", prep: function () {
+        var L = A.sites.filter(function (s) { return s.announced && s.announced < "2000"; }), first = A.meta.announcedMin, F = A.sites.filter(function (s) { return s.announced === first; });
+        return { n: L.length, g: L.filter(function (s) { return catId(s) === "national" || catId(s) === "local"; }).length, first: first, fn: F.length };
+      },
+      apply: function () { seek("listed", annM(1999, 12)); return ISLAND; },
+      text: function (d) { return "換成「公告日期」。第一批在 " + d.first.replace(/-/g, "/") + " 公告，共 " + d.fn + " 處。2000 年以前公告的有 <b>" + d.n + " 處</b>，" + (d.g === d.n ? "全部是古蹟（當時還沒有歷史建築）" : "其中 " + d.g + " 處是古蹟") + "。"; } },
+    { title: "九二一之後：歷史建築", prep: function () {
+        var L = A.sites.filter(function (s) { return s.announced && s.announced >= "2000"; }), t = tally(L, function (s) { return +s.announced.slice(0, 4); }), y = ranked(t)[0];
+        return { n: L.length, b: L.filter(function (s) { return catId(s) === "building"; }).length, y: y, yn: t[y] };
+      },
+      apply: function () { seek("listed", axes.listed.max); return ISLAND; },
+      text: function (d) { return "2000 年以後公告的有 <b>" + fmt(d.n) + " 處</b>，其中 " + fmt(d.b) + " 處是歷史建築。公告最多的一年是 " + d.y + " 年（" + d.yn + " 處）。"; } }
+  ];
+  var story = window.Story ? window.Story.create({ layer: "timeline", track: "tl", invite: "帶你看臺灣的文資怎麼一年一年長出來", stops: STORY }) : null;
+
   /* ---------- 面板與圖例 ---------- */
   function render() {
     var ax = axes[mode];
@@ -212,7 +276,7 @@
         '<div class="seg" role="group" aria-label="時間軸">' +
           '<button type="button" data-m="built" aria-pressed="' + (mode === "built") + '">創建年</button>' +
           '<button type="button" data-m="listed" aria-pressed="' + (mode === "listed") + '">公告日期</button></div>' +
-        '<div class="tl-now" id="tlNow"></div><div class="tl-count" id="tlCount"></div></div>' +
+        '<div class="tl-now" id="tlNow"></div><div class="tl-count" id="tlCount"></div>' + (story ? story.button() : "") + "</div>" +
       '<div class="tl-row">' +
         '<button class="tl-play" id="tlPlay" type="button" aria-label="播放">▶</button>' +
         '<div><div class="tl-track"><canvas id="tlCanvas"></canvas>' +
@@ -229,7 +293,7 @@
     Array.prototype.forEach.call(A.panel.querySelectorAll(".seg button"), function (b) {
       b.onclick = function () { if (b.dataset.m !== mode) { stop(); setMode(b.dataset.m, null); } };
     });
-    ui.play.onclick = function () { if (playing) stop(); else play(); };
+    ui.play.onclick = function () { if (story) story.stop(); if (playing) stop(); else play(); };
     ui.range.oninput = function () { if (playing) stop(); var p = +this.value; if (p < pos) trail = p; else trail = pos; pos = p; update(); };
     ui.range.onchange = function () { trail = pos; update(); saveHash(); };
     /* 修法節點 */
@@ -262,6 +326,7 @@
     ui.cn = Array.prototype.map.call(A.legend.querySelectorAll(".cty"), function (el) { return { n: el.lastChild, bar: el.querySelector("i") }; });
     var est = document.getElementById("lgEst");
     if (est) est.onchange = function () { showEst = this.checked; update(); };
+    if (story) story.mount(A.panel);
   }
   function layoutTicks() {
     var ax = axes[mode], box = document.getElementById("tlTicks");
@@ -314,10 +379,13 @@
           '<li>修法節點依<a href="https://law.moj.gov.tw/LawClass/LawHistory.aspx?pcode=H0170001" target="_blank" rel="noopener">全國法規資料庫〈文化資產保存法〉沿革</a>整理。</li>' +
           "</ul></div>";
       }
+      if (story && story.active()) { if (m === mode) return; story.stop(); }   /* 說故事改網址時不重畫 */
       var p = args[1] != null ? axes[m].fromHash(args[1]) : null;
       setMode(m, p);
+      if (story) story.enter();
     },
     leave: function () {
+      if (story) story.leave();
       stop();
       A.map.setLayoutProperty(DOTS, "visibility", "none");
       A.map.setLayoutProperty(GLOW, "visibility", "none");

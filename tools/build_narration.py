@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""產生 3D 文資島的雙人語音導覽（Allan × 阿拉蕾）：data/narration/script.json 與 data/narration/<track>.mp3
+"""產生雙人語音旁白（Allan × 阿拉蕾）：data/narration/script.json 與 data/narration/<track>.mp3
 
-劇本裡的數字由資料算出，算法與 assets/js/layers/island.js 的導覽（STOPS）相同；
+四個分頁都有：3D 文資島的導覽（tour1–8）與「島怎麼長出來」（grow），
+時間軸（tl1–）、挺過了什麼（sv1–）、風險地圖（rk1–）的「說故事」。
+劇本裡的數字由資料算出，算法與網頁相同：island.js 的 STOPS，timeline.js、survived.js、risk.js 的 STORY；
 網頁會比對 script.json 的 sites（資料產生日期與處數），和目前的 data/sites.json 不一致時就不播語音，只顯示文字。
-所以 data/sites.json 或 data/terrain/sites-elev.json、data/survived.json 有變動時，要重跑這支腳本。
+所以 data/sites.json 或 data/terrain/sites-elev.json、data/survived.json、data/risk.json 有變動時，要重跑這支腳本。
 
 語音沿用知識網站（Cultural_Heritage/tools/gen_audio.py）的設定：
   Allan：zh-TW-YunJheNeural；阿拉蕾：zh-TW-HsiaoYuNeural 提高音調
@@ -18,6 +20,7 @@ import json
 import math
 import os
 import random
+import re
 import ssl
 import subprocess
 import sys
@@ -111,6 +114,269 @@ def facts():
 
 def n(x):
     return "{:,}".format(x)
+
+
+def first(t):
+    """最多的那一個；同數時取鍵比較小的（和網頁的排序一致）"""
+    return min(t, key=lambda k: (-t[k], k))
+
+
+def story_facts():
+    """三個平面分頁「說故事」的事實，算法與各圖層 js 的 STORY 相同"""
+    S = load("data/sites.json")
+    F = S["meta"]["fields"]
+    sites = [dict(zip(F, r), i=i) for i, r in enumerate(S["sites"])]
+    eras, cats, cty = S["eras"], S["cats"], S["counties"]
+    cn = lambda s: cty[s["county"]]["name"]
+    cid = lambda s: cats[s["cat"]]["id"]
+    f = {}
+    # ---- 時間軸 ----
+    o = min(sites, key=lambda s: (s["year"], s["i"]))
+    L = [s for s in sites if s["year"] < 1624]
+    t = tally(L, lambda s: s["county"])
+    k = first(t)
+    f["tl1"] = dict(o=o["name"], oc=cn(o), oy=o["year"], n=len(L), c=cty[k]["name"], cn=t[k])
+    L = [s for s in sites if 1624 <= s["year"] <= 1661]
+    t = tally(L, cn)
+    f["tl2"] = dict(all=sum(1 for s in sites if s["year"] <= 1661), n=len(L), tn=t.get("臺南市", 0), km=t.get("金門縣", 0), nn=t.get("基隆市", 0) + t.get("新北市", 0))
+    L = [s for s in sites if 1684 <= s["year"] <= 1894]
+    t = tally(L, lambda s: s["county"])
+    f["tl3"] = dict(all=sum(1 for s in sites if s["year"] <= 1894), n=len(L), top=[(cty[k]["name"], t[k]) for k in sorted(t, key=lambda k: (-t[k], k))[:4]])
+    te = tally(sites, lambda s: s["era"])
+    L = [s for s in sites if eras[s["era"]]["id"] == "japan"]
+    f["tl4"] = dict(all=sum(1 for s in sites if s["year"] <= 1945), n=len(L), pct=jround(len(L) / len(sites) * 100), b=sum(1 for s in L if cid(s) == "building"),
+                    most=eras[first(te)]["id"] == "japan")
+    L = [s for s in sites if s["announced"] and s["announced"] < "2000"]
+    fd = S["meta"]["announcedMin"]
+    f["tl5"] = dict(n=len(L), g=sum(1 for s in L if cid(s) in ("national", "local")), first=fd, fn=sum(1 for s in sites if s["announced"] == fd),
+                    names=[s["name"] for s in sites if s["announced"] == fd])
+    L = [s for s in sites if s["announced"] and s["announced"] >= "2000"]
+    t = tally(L, lambda s: int(s["announced"][:4]))
+    y = first(t)
+    f["tl6"] = dict(n=len(L), b=sum(1 for s in L if cid(s) == "building"), y=y, yn=t[y])
+    # ---- 挺過了什麼（推估） ----
+    V = load("data/survived.json")
+    Q = V["quakes"]
+    yr = lambda q: int(q["date"][:4])
+    order = [q for q in Q if q["method"] != "none"]
+    lv = [[int(q["levels"][s["i"]]) if yr(q) >= s["year"] else 0 for q in order] for s in sites]
+    mx = [max(x) if x else 0 for x in lv]
+    f["sv1"] = dict(q=len(order), n5=sum(1 for v in mx if v >= 5), n7=sum(1 for v in mx if v >= 7), n9=sum(1 for v in mx if v >= 9))
+    for key, qid in (("sv2", "cwa006"), ("sv3", "cwa111"), ("sv4", "usgsus7000m9g4")):
+        q = [x for x in Q if x["id"] == qid][0]
+        c = [int(q["levels"][s["i"]]) for s in sites if s["year"] <= yr(q)]
+        f[key] = dict(m=q["m"], date=q["date"], ex=len(c), n6=sum(1 for x in c if x >= 6), n7=sum(1 for x in c if x >= 7))
+    cnt = [sum(1 for x in row if x >= 6) for row in lv]
+    b = max(range(len(sites)), key=lambda i: (cnt[i], -i))
+    f["sv5"] = dict(name=sites[b]["name"], c=cn(sites[b]), n=cnt[b])
+    T = V["typhoons"]
+    L = [s for s in sites if T[s["i"]][2] >= 65]
+    t = tally(L, lambda s: s["county"])
+    k = first(t)
+    f["sv6"] = dict(km=V["meta"]["typhoonKm"], n=len(L), c=cty[k]["name"], cn=t[k], mx=max(x[2] for x in T))
+    # ---- 風險地圖（圖資套疊，僅供防災參考） ----
+    R = load("data/risk.json")
+
+    def lab(i):
+        r, o = R["sites"][i], dict(fault=0, debris=0, landslide=0, flood=0)
+        if r[0]:
+            o["fault"] = 2 if r[0][1] <= 100 else 1 if r[0][1] <= 500 else 0
+        if r[1]:
+            o["debris"] = 2 if r[1][0] == 1 else 1 if r[1][3] <= 200 else 0
+        if r[2]:
+            o["landslide"] = r[2][0]
+        o["flood"] = 1 if r[3][1] >= 3 else 0
+        o["n"] = sum(1 for x in ("fault", "debris", "landslide") if o[x]) + o["flood"]
+        return o
+    lb = [lab(i) for i in range(len(sites))]
+    L = [s for s in sites if lb[s["i"]]["n"] >= 1]
+    M = [s for s in L if lb[s["i"]]["n"] >= 2]
+    t = tally(M, lambda s: cn(s) + (s["town"] or ""))
+    k = first(t)
+    TT = [s for s in M if cn(s) + (s["town"] or "") == k]
+    kinds = [nm for key, nm in (("flood", "淹水潛勢"), ("fault", "活動斷層"), ("debris", "土石流"), ("landslide", "大規模崩塌")) if all(lb[s["i"]][key] for s in TT)]
+    f["rk1"] = dict(n=len(L), m=len(M), place=k, pn=t[k], kinds=kinds)
+
+    def flood(sc):
+        L = [s for s in sites if R["sites"][s["i"]][3][sc] >= 3]
+        t = tally(L, cn)
+        k = first(t)
+        return dict(n=len(L), c=k, cn=t[k])
+    f["rk2"] = dict(a=flood(1), b=flood(2))
+    L = [s for s in sites if lb[s["i"]]["fault"]]
+    fn = lambda s: R["faults"][R["sites"][s["i"]][0][0]]
+    t = tally(L, fn)
+    k = first(t)
+    near = min(L, key=lambda s: (R["sites"][s["i"]][0][1], s["i"]))
+    f["rk3"] = dict(n=len(L), n1=sum(1 for s in L if lb[s["i"]]["fault"] == 2), f=k, fn=t[k], near=near["name"], nd=R["sites"][near["i"]][0][1], nf=fn(near))
+    L = [s for s in sites if lb[s["i"]]["debris"]]
+    t = tally(L, cn)
+    k = first(t)
+    f["rk4"] = dict(n=len(L), n2=sum(1 for s in L if lb[s["i"]]["debris"] == 2), c=k, cn=t[k])
+    f["rk5"] = dict(names=[s["name"] for s in sites if lb[s["i"]]["landslide"]])
+    return f
+
+
+def ymd(d):
+    y, m, dd = d.split("-")
+    return "%d年%d月%d日" % (int(y), int(m), int(dd))
+
+
+def story_script(f):
+    A, Rr = "A", "R"
+    T = {}
+    d = f["tl1"]
+    when = "西元前大約%s年" % n(jround(-d["oy"] / 100) * 100) if d["oy"] < -3000 else "西元前%s年" % n(-d["oy"]) if d["oy"] < 0 else "%d年" % d["oy"]
+    T["tl1"] = [
+        (Rr, "Allan，地圖上的點點，怎麼一開始只有零零星星的？"),
+        (A, "因為我們從最早的時候開始看。全臺最老的文資，是%s的%s，年代是%s。" % (d["oc"], d["o"], when)),
+        (Rr, "哇，比阿拉蕾阿公的阿公還要老好多！"),
+        (A, "1624年以前的文資一共有%d處，最多的在%s，有%d處。" % (d["n"], d["c"], d["cn"]) + ("金門從宋朝、明朝就有家廟、古厝和墓。" if d["c"] == "金門縣" else "")),
+        (Rr, "原來在荷蘭人來之前，就已經有很多故事了！"),
+        (A, "沒錯。按下播放，就能看它們一處一處亮起來。"),
+    ]
+    d = f["tl2"]
+    T["tl2"] = [
+        (Rr, "地圖跑到臺南了！1624年發生了什麼事？"),
+        (A, "1624年荷蘭人在大員，也就是今天的安平築城。1624到1661年之間出現的文資有%d處，臺南就有%d處。" % (d["n"], d["tn"])),
+        (Rr, "那其他的在哪裡？"),
+        (A, "金門有%d處，北邊的基隆和新北有%d處，像淡水紅毛城，最早就是西班牙人蓋的城堡。" % (d["km"], d["nn"])),
+        (Rr, "到1661年，地圖上一共亮了幾處？"),
+        (A, "%d處。下一段，點點會沿著西部一路亮上去。" % d["all"]),
+    ]
+    d = f["tl3"]
+    tp = d["top"]
+    T["tl3"] = [
+        (Rr, "哇，西部亮成一整排了！"),
+        (A, "這是清領時期，從1684年到1894年。這段時間出現的文資有%d處，到1894年，地圖上一共亮了%d處。" % (d["n"], d["all"])),
+        (Rr, "哪裡最多？臺南嗎？"),
+        (A, ("答案有點意外：" if tp[0][0] != "臺南市" else "") + "最多的是%s，有%d處，接下來是%s。" % (tp[0][0], tp[0][1], "、".join("%s%d處" % x for x in tp[1:]))),
+        (Rr, "廟、書院、老街，原來很多是那時候蓋的。"),
+        (A, "對，漢人移墾從南往北、從平原往丘陵走，寺廟和宅第也跟著蓋起來。"),
+    ]
+    d = f["tl4"]
+    T["tl4"] = [
+        (Rr, "一下子亮了好多好多！"),
+        (A, "日治時期的文資有%s處，占全部的%d%%%s。" % (n(d["n"]), d["pct"], "，是最多的一個時期" if d["most"] else "")),
+        (Rr, "為什麼這麼多？"),
+        (A, "鐵路、糖廠、學校、官舍和宿舍蓋遍全臺，年代也比較近，留下來的比較多。其中%s處是歷史建築。" % n(d["b"])),
+        (Rr, "到1945年，地圖上一共有幾處？"),
+        (A, "%s處。接下來換個角度，看它們是什麼時候變成文資的。" % n(d["all"])),
+    ]
+    d = f["tl5"]
+    famous = [x for x in ("赤嵌樓", "淡水紅毛城") if x in d["names"]]
+    T["tl5"] = [
+        (Rr, "咦，顏色換了！這次是在看什麼？"),
+        (A, "這是公告日期，也就是政府正式指定或登錄成文化資產的那一天。1982年《文化資產保存法》公布，臺灣開始有保護古蹟的法律。"),
+        (Rr, "第一批是什麼時候？"),
+        (A, "%s，一共%d處%s。" % (ymd(d["first"]), d["fn"], ("，像" + "、".join(famous) + "都在第一批裡") if famous else "")),
+        (Rr, "那2000年以前，一共有幾處？"),
+        (A, ("%d處，全部是古蹟，那時候還沒有歷史建築這個類別。" % d["n"]) if d["g"] == d["n"] else "%d處，其中%d處是古蹟。那時候還沒有歷史建築這個類別。" % (d["n"], d["g"])),
+    ]
+    d = f["tl6"]
+    T["tl6"] = [
+        (Rr, "2000年以後，點點像下雨一樣冒出來！"),
+        (A, "九二一地震震壞了很多老房子，2000年修法加了歷史建築，登錄的門檻比古蹟低，保存的速度就快了起來。"),
+        (Rr, "那後來有多少處？"),
+        (A, "2000年以後公告的有%s處，其中%s處是歷史建築。最多的一年是%d年，一共%d處。" % (n(d["n"]), n(d["b"]), d["y"], d["yn"])),
+        (Rr, "所以一處老房子變成文資，背後也有一段故事！"),
+        (A, "說得好。拉動下面的滑桿，可以自己找找看，你家附近的文資是哪一年亮起來的。"),
+    ]
+    d = f["sv1"]
+    T["sv1"] = [
+        (Rr, "Allan，這些點點為什麼有黃有紅？"),
+        (A, "顏色是每處文資從創建到現在，推估遇過最大的地震搖晃。我們對照了%d個災害地震。" % d["q"]),
+        (Rr, "有很多被搖得很厲害嗎？"),
+        (A, "推估有%s處遇過5弱以上，%d處遇過6弱以上，還有%d處遇過7級。" % (n(d["n5"]), d["n7"], d["n9"])),
+        (Rr, "等等，推估是說不是真的量到的嗎？"),
+        (A, "對，這是用地震的規模、位置和公式算出來的，不是當時的觀測紀錄，實際可能更強或更弱。我們一個一個地震來看。"),
+    ]
+    d = f["sv2"]
+    T["sv2"] = [
+        (Rr, "這個地震好久以前喔！"),
+        (A, "1906年的梅山地震，規模%s，震央在嘉義。那時候已經存在的文資有%d處。" % (d["m"], d["ex"])),
+        (Rr, "它們搖得厲害嗎？"),
+        (A, "推估有%d處搖到5強以上。這麼早的地震，觀測資料很少，這是用公式估算的，誤差會比較大。" % d["n6"]),
+        (Rr, "一百多年前的地震，老房子還站在這裡，好厲害！"),
+        (A, "很多是震後修復或重建的，所以「遇過」不代表原樣保存到今天。"),
+    ]
+    d = f["sv3"]
+    T["sv3"] = [
+        (Rr, "這個我知道！九二一大地震！"),
+        (A, "1999年9月21日的集集地震，規模%s。當時已經存在的%s處文資，推估有%d處搖到5強以上。" % (d["m"], n(d["ex"]), d["n6"])),
+        (Rr, "%d處！那更強的呢？" % d["n6"]),
+        (A, "其中%d處推估達到6弱以上。這場地震也讓大家發現，很多老房子沒有法律保護。" % d["n7"]),
+        (Rr, "所以後來才有歷史建築？"),
+        (A, "沒錯，隔年修法增加了歷史建築，在時間軸那一頁也看得到。"),
+    ]
+    d = f["sv4"]
+    T["sv4"] = [
+        (Rr, "這個地震是最近的耶！"),
+        (A, "2024年4月3日的花蓮地震，規模%s。推估有%d處文資搖到5強以上，%d處達6弱以上。" % (d["m"], d["n6"], d["n7"])),
+        (Rr, "花蓮的文資好辛苦。"),
+        (A, "花東在板塊交界，地震特別多。下一段，我們去看最常被搖的那一處。"),
+    ]
+    d = f["sv5"]
+    T["sv5"] = [
+        (Rr, "全臺灣被搖最多次的文資是哪一處？"),
+        (A, "推估是%s的%s，創建以來有%d次搖到5強以上。" % (d["c"], d["name"], d["n"])),
+        (Rr, "%d次！它好勇敢。" % d["n"]),
+        (A, "再提醒一次，這是用公式推估的次數。點地圖上的文資，卡片上可以看到它遇過哪些地震。"),
+    ]
+    d = f["sv6"]
+    T["sv6"] = [
+        (Rr, "換成藍色了，這次是颱風嗎？"),
+        (A, "對。顏色是每處文資創建以來，有幾個颱風強度的熱帶氣旋，中心從%d公里內經過。" % d["km"]),
+        (Rr, "哪裡最常被颱風掃到？"),
+        (A, "有%d處文資遇過65個以上，最多的是%s，有%d處。最多的一處遇過%d個。" % (d["n"], d["c"], d["cn"], d["mx"])),
+        (Rr, "原來文資每年都在跟颱風搏鬥！"),
+        (A, "這些也都是推估。故事講到這裡，點任何一處文資，都能看它挺過了什麼。"),
+    ]
+    d = f["rk1"]
+    T["rk1"] = [
+        (Rr, "Allan，這一頁的點點在說什麼？"),
+        (A, "我們把每處文資的位置，疊到政府公開的災害潛勢圖上，看它附近有沒有淹水、活動斷層、土石流和大規模崩塌的潛勢。"),
+        (Rr, "有很多文資在要注意的地方嗎？"),
+        (A, "有%d處至少有一項標籤，%d處有兩項，最集中的是%s，有%d處%s。" % (d["n"], d["m"], d["place"], d["pn"], ("，都同時有" + "和".join(d["kinds"]) + "標籤") if len(d["kinds"]) == 2 else "")),
+        (Rr, "那它們一定會受災嗎？"),
+        (A, "不一定。這是圖資套疊的結果，只能當作防災的參考，不是每一棟建築的風險評估。"),
+    ]
+    d = f["rk2"]
+    a, b = d["a"], d["b"]
+    T["rk2"] = [
+        (Rr, "藍色的點是會淹水的地方嗎？"),
+        (A, "這是24小時下500毫米雨的情境。淹水0.5公尺以上的文資有%d處，最多的是%s，有%d處。" % (a["n"], a["c"], a["cn"])),
+        (Rr, "雨下得更大會怎樣？"),
+        (A, "下到650毫米時，增加到%d處，最多的%s%s，有%d處。" % (b["n"], "還是" if b["c"] == a["c"] else "變成", b["c"], b["cn"])),
+        (Rr, "原來雨越大，要注意的文資越多。"),
+        (A, "要特別說明，淹水潛勢圖依規定只能用在防救災，不能拿來管制土地使用或限制開發。"),
+    ]
+    d = f["rk3"]
+    T["rk3"] = [
+        (Rr, "這些紅線是什麼？"),
+        (A, "紅線是活動斷層。離斷層500公尺內的文資有%d處，100公尺內有%d處。" % (d["n"], d["n1"])),
+        (Rr, "哪一條斷層旁邊最多？"),
+        (A, "%s沿線最多，有%d處。最近的是%s，離%s大約%d公尺。" % (d["f"], d["fn"], d["near"], d["nf"], d["nd"])),
+        (Rr, "%d公尺？好近喔！" % d["nd"]),
+        (A, "不過斷層線本身的位置也有誤差，而且這些距離門檻是我們自己訂的，不是法定的地質敏感區。"),
+    ]
+    d = f["rk4"]
+    T["rk4"] = [
+        (Rr, "棕色的線是河嗎？"),
+        (A, "是土石流潛勢溪流。在土石流影響範圍內，或離潛勢溪流200公尺內的文資有%d處，其中%d處在影響範圍裡。" % (d["n"], d["n2"])),
+        (Rr, "哪裡最多？"),
+        (A, "最多的是%s，有%d處。" % (d["c"], d["cn"])),
+        (Rr, "下大雨的時候，山邊的文資要小心。"),
+        (A, "對，颱風和豪雨來的時候，大家也要注意自己的安全。"),
+    ]
+    d = f["rk5"]
+    T["rk5"] = [
+        (Rr, "最後一個是大規模崩塌？"),
+        (A, "對。落在大規模崩塌潛勢區或影響範圍內的文資有%d處：%s。" % (len(d["names"]), "、".join(re.sub(r"(\d)-(\d)", r"\1到\2", x) for x in d["names"]))),
+        (Rr, "只有%d處，比我想的少。" % len(d["names"])),
+        (A, "因為這份圖資主要畫的是山區聚落附近。再提醒一次，這些都是圖資套疊的結果，僅供防災參考。點任何一處文資，都能看它的標籤。"),
+    ]
+    return T
 
 
 def script(f):
@@ -208,6 +474,7 @@ def script(f):
         (Rr, "全部長出來了！一共%s處耶！" % n(f["N"]), 2026),
         (A, "這就是臺灣一步一步長出來的樣子。", None),
     ]
+    T.update(story_script(story_facts()))
     out = {}
     for tid, lines in T.items():
         out[tid] = {"lines": [dict({"who": l[0], "text": l[1]}, **({"at": l[2]} if len(l) > 2 and l[2] is not None else {})) for l in lines]}
@@ -289,7 +556,7 @@ async def main():
         paths = await asyncio.gather(*[synth(l["who"], l["text"], sem) for l in tr["lines"]])
         tr["cues"], tr["duration"] = pack(tid, tr["lines"], paths)
         print("  %s：%d 句，%.0f 秒" % (tid, len(tr["lines"]), tr["duration"]), flush=True)
-    doc = {"note": "3D 文資島的雙人語音導覽（tools/build_narration.py 產生）。cues：每句的起訖秒數與文字雜湊；sites：產生時的文資資料，與網頁目前的資料不同時不播語音。",
+    doc = {"note": "雙人語音旁白：3D 文資島的導覽與「島怎麼長出來」，以及時間軸、挺過了什麼、風險地圖的說故事（tools/build_narration.py 產生）。cues：每句的起訖秒數與文字雜湊；sites：產生時的文資資料，與網頁目前的資料不同時不播語音。",
            "sites": f["meta"], "tracks": tracks}
     with open(path, "w", encoding="utf-8") as fp:
         json.dump(doc, fp, ensure_ascii=False, indent=1)
