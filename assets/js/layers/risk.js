@@ -1,6 +1,7 @@
 /* 圖層：文資風險地圖（文資座標套疊政府公開的災害潛勢圖資）
  * 資料：data/risk.json、data/risk-lines.geojson（tools/build_risk.py）
  * 網址：#risk/<all|flood|fault|debris|landslide>/<淹水情境 0–2>
+ * 「Allan 和阿拉蕾說故事」：STORY（assets/js/story.js）；劇本的數字由 tools/build_narration.py 用同樣的算法算出，改了這裡也要改那支腳本。
  */
 (function () {
   "use strict";
@@ -60,6 +61,57 @@
     return '<div class="sv-box"><p class="sv-tag">圖資套疊・僅供防災參考</p><ul class="rk-list"><li>' + li.join("</li><li>") + "</li></ul></div>";
   }
 
+  /* ---------- 說故事：每段的事實都由資料算出（圖資套疊，僅供防災參考） ---------- */
+  var TAG = "圖資套疊，僅供防災參考";
+  function tallyBy(list, f) { var t = {}; list.forEach(function (s) { var k = f(s); t[k] = (t[k] || 0) + 1; }); return t; }
+  function first(t) { return Object.keys(t).sort(function (a, b) { return t[b] - t[a] || (a < b ? -1 : a > b ? 1 : 0); })[0]; }   /* 同數時取字串排序在前的（和建置腳本一致） */
+  function cname(s) { return A.counties[s.county].name; }
+  function box(list, maxZoom) {
+    var b = [[180, 90], [-180, -90]];
+    list.forEach(function (s) { b[0][0] = Math.min(b[0][0], s.lng); b[0][1] = Math.min(b[0][1], s.lat); b[1][0] = Math.max(b[1][0], s.lng); b[1][1] = Math.max(b[1][1], s.lat); });
+    return { bounds: [[b[0][0] - 0.02, b[0][1] - 0.02], [b[1][0] + 0.02, b[1][1] + 0.02]], maxZoom: maxZoom };
+  }
+  function setView(m, sc) { mode = m; if (sc != null) scen = sc; A.setHash("risk/" + m + (m === "flood" ? "/" + scen : "")); show(); }
+  var STORY = [
+    { title: "哪些文資同時有兩項標籤", tag: TAG,
+      prep: function () {
+        var L = A.sites.filter(function (s) { return labels(s.i).n >= 1; }), M = L.filter(function (s) { return labels(s.i).n >= 2; });
+        var t = tallyBy(M, function (s) { return cname(s) + (s.town || ""); }), k = first(t), T = M.filter(function (s) { return cname(s) + (s.town || "") === k; });
+        var kinds = [["flood", "淹水潛勢"], ["fault", "活動斷層"], ["debris", "土石流"], ["landslide", "大規模崩塌"]].filter(function (x) { return T.every(function (s) { return labels(s.i)[x[0]]; }); }).map(function (x) { return x[1]; });
+        return { n: L.length, m: M.length, place: k, pn: t[k], T: T, kinds: kinds };
+      },
+      apply: function (d) { setView("all"); return box(d.T, 14); },
+      text: function (d) { return "有 <b>" + fmt(d.n) + " 處</b>文資至少有一項災害潛勢標籤，" + d.m + " 處有兩項，最集中的是" + esc(d.place) + "（" + d.pn + " 處" + (d.kinds.length === 2 ? "，都同時有" + d.kinds.join("和") + "標籤" : "") + "）。"; } },
+    { title: "淹水：雨越大，範圍越大", tag: TAG,
+      prep: function () {
+        var f = function (sc) { var L = A.sites.filter(function (s) { return R.sites[s.i][3][sc] >= FLOOD_LABEL; }), t = tallyBy(L, cname), k = first(t); return { n: L.length, c: k, cn: t[k], L: L.filter(function (s) { return cname(s) === k; }) }; };
+        return { a: f(1), b: f(2) };
+      },
+      apply: function (d) { setView("flood", 1); return box(d.a.L, 11); },
+      text: function (d) { return "24 小時下 500 毫米的情境，淹水 0.5 公尺以上的文資有 <b>" + d.a.n + " 處</b>，最多的是" + d.a.c + "（" + d.a.cn + " 處）；650 毫米時增加到 " + d.b.n + " 處，最多的是" + d.b.c + "（" + d.b.cn + " 處）。淹水潛勢圖僅供防救災使用。"; } },
+    { title: "離活動斷層很近的文資", tag: TAG,
+      prep: function () {
+        var L = A.sites.filter(function (s) { return labels(s.i).fault; }), t = tallyBy(L, function (s) { return R.faults[R.sites[s.i][0][0]]; }), k = first(t);
+        var near = L.slice().sort(function (a, b) { return R.sites[a.i][0][1] - R.sites[b.i][0][1] || a.i - b.i; })[0];
+        return { n: L.length, n1: L.filter(function (s) { return labels(s.i).fault === 2; }).length, f: k, fn: t[k], near: near, nd: R.sites[near.i][0][1], nf: R.faults[R.sites[near.i][0][0]], L: L.filter(function (s) { return R.faults[R.sites[s.i][0][0]] === k; }) };
+      },
+      apply: function (d) { setView("fault"); return box(d.L, 11); },
+      text: function (d) { return "距活動斷層 " + FAULT_FAR + " 公尺內的文資有 <b>" + d.n + " 處</b>，" + FAULT_NEAR + " 公尺內 " + d.n1 + " 處。最多的是" + d.f + "沿線（" + d.fn + " 處）；最近的是「" + esc(d.near.name) + "」，距" + d.nf + "約 " + d.nd + " 公尺。距離門檻是本站自訂的，不是法定範圍。"; } },
+    { title: "土石流：山邊的文資", tag: TAG,
+      prep: function () {
+        var L = A.sites.filter(function (s) { return labels(s.i).debris; }), t = tallyBy(L, cname), k = first(t);
+        return { n: L.length, n2: L.filter(function (s) { return labels(s.i).debris === 2; }).length, c: k, cn: t[k], L: L.filter(function (s) { return cname(s) === k; }) };
+      },
+      apply: function (d) { setView("debris"); return box(d.L, 12); },
+      text: function (d) { return "在土石流影響範圍內，或距潛勢溪流 " + STREAM_NEAR + " 公尺內的文資有 <b>" + d.n + " 處</b>，其中 " + d.n2 + " 處在影響範圍內。最多的是" + d.c + "（" + d.cn + " 處）。"; } },
+    { tag: TAG,
+      title: function (d) { return "大規模崩塌：" + ["", "一", "兩", "三", "四", "五"][d.L.length] + "處山上的文資"; },
+      prep: function () { var L = A.sites.filter(function (s) { return labels(s.i).landslide; }); return L.length && L.length <= 5 ? { L: L } : null; },
+      apply: function (d) { setView("landslide"); return box(d.L, 9); },
+      text: function (d) { return "在大規模崩塌潛勢區或影響範圍內的文資有 <b>" + d.L.length + " 處</b>：" + d.L.map(function (s) { return "「" + esc(s.name) + "」"; }).join("、") + "。這些都是圖資套疊的結果，不是個別建築的風險評估。"; } }
+  ];
+  var story = window.Story ? window.Story.create({ layer: "risk", track: "rk", invite: "說說文資旁邊的淹水、斷層和土石流", stops: STORY, ready: function () { return load(); } }) : null;
+
   function show() {
     cls = classes();
     var col = ["match", ["coalesce", ["feature-state", "v"], 0]], counts = cls.map(function () { return 0; }), cty = A.counties.map(function () { return 0; });
@@ -90,7 +142,7 @@
       '<div class="tl-head"><div class="seg rk-seg" role="group" aria-label="災害類型">' +
       MODES.map(function (m) { return '<button type="button" data-m="' + m[0] + '" aria-pressed="' + (mode === m[0]) + '">' + m[1] + "</button>"; }).join("") + "</div>" +
       (mode === "flood" ? '<label class="rk-scen">情境 <select id="rkScen">' + R.meta.floodScenarios.map(function (n, k) { return '<option value="' + k + '"' + (k === scen ? " selected" : "") + ">" + n + "</option>"; }).join("") + "</select></label>" : "") +
-      '<span class="sv-tag">圖資套疊，僅供防災參考</span></div><p class="tl-cap sv-cap">' + cap + "</p>";
+      '<span class="sv-tag">圖資套疊，僅供防災參考</span>' + (story ? story.button() : "") + '</div><p class="tl-cap sv-cap">' + cap + "</p>";
     Array.prototype.forEach.call(A.panel.querySelectorAll(".seg button"), function (b) {
       b.onclick = function () { location.hash = "#risk/" + b.dataset.m + (b.dataset.m === "flood" ? "/" + scen : ""); };
     });
@@ -105,6 +157,7 @@
       '<details class="lg-counties"><summary>各縣市（有標籤的處數）</summary>' +
       A.counties.map(function (c, i) { return '<div class="cty"><span>' + esc(c.name) + '</span><div class="bar"><i style="width:' + (cty[i] / cmax * 100) + '%"></i></div><span>' + cty[i] + "</span></div>"; }).join("") +
       "</details></div></details>";
+    if (story) story.mount(A.panel);
   }
 
   function about() {
@@ -145,12 +198,14 @@
         return load().then(function () { if (A.current && A.current.id === "risk") A.current.enter(A, args); })
           .catch(function () { A.panel.innerHTML = '<p class="tl-cap">資料載入失敗，請重新整理。</p>'; });
       }
+      if (story) { story.enter(); if (story.active()) story.stop(); }
       mode = MODES.some(function (m) { return m[0] === args[0]; }) ? args[0] : "all";
       if (mode === "flood" && /^[012]$/.test(args[1] || "")) scen = +args[1];
       A.hideCard();
       about(); show();
     },
     leave: function () {
+      if (story) story.leave();
       [DOTS, FAULTS, STREAMS].forEach(function (id) { A.map.setLayoutProperty(id, "visibility", "none"); });
     },
     theme: function () { if (R) show(); }

@@ -1,6 +1,7 @@
 /* 圖層：它挺過了什麼（歷史地震與颱風，全部是推估）
  * 資料：data/survived.json（tools/build_survived.py）
  * 網址：#survived/quake/<地震 id 或 all>、#survived/typhoon
+ * 「Allan 和阿拉蕾說故事」：STORY（assets/js/story.js）；劇本的數字由 tools/build_narration.py 用同樣的算法算出，改了這裡也要改那支腳本。
  */
 (function () {
   "use strict";
@@ -106,6 +107,56 @@
     A.map.setPaintProperty(DOTS, "circle-stroke-color", A.dark() ? "#17130f" : "#fffdf8");
   }
 
+  /* ---------- 說故事：每段的事實都由資料算出（全部是推估） ---------- */
+  var ISLAND = { bounds: [[119.2, 21.75], [122.3, 25.45]] };
+  function quakeById(id) { var k = -1; V.quakes.forEach(function (q, j) { if (q.id === id) k = j; }); return k; }
+  function setView(m, k) { mode = m; evIdx = k; A.setHash("survived/" + m + (m === "quake" ? "/" + (k >= 0 ? V.quakes[k].id : "all") : "")); show(); }
+  function quakeStop(id, title) {
+    return { title: title, tag: "推估，不是官方觀測",
+      prep: function () {
+        var k = quakeById(id); if (k < 0) return null;
+        var q = V.quakes[k], ex = A.sites.filter(function (s) { return s.year <= yearOf(q); }), c = ex.map(function (s) { return +q.levels.charAt(s.i); });
+        return { k: k, q: q, ex: ex.length, n6: c.filter(function (x) { return x >= 6; }).length, n7: c.filter(function (x) { return x >= 7; }).length };
+      },
+      apply: function (d) { setView("quake", d.k); return { center: [d.q.lng, d.q.lat], zoom: 8.4 }; },
+      text: function (d) { return d.q.date.replace(/-/g, "/") + "，規模 " + d.q.m + "。當時已存在的 " + fmt(d.ex) + " 處文資，推估有 <b>" + fmt(d.n6) + " 處</b>搖到 5 強以上" + (d.n7 ? "，其中 " + fmt(d.n7) + " 處達 6 弱以上" : "") + "。"; } };
+  }
+  var STORY = [
+    { title: "每處文資遇過最大的搖晃", tag: "推估，不是官方觀測",
+      prep: function () {
+        var m = A.sites.map(maxLevel);
+        return { n5: m.filter(function (v) { return v >= 5; }).length, n7: m.filter(function (v) { return v >= 7; }).length, n9: m.filter(function (v) { return v >= 9; }).length };
+      },
+      apply: function () { setView("quake", -1); return ISLAND; },
+      text: function (d) { return "對照 " + order.length + " 個災害地震，推估有 <b>" + fmt(d.n5) + " 處</b>文資從創建到現在遇過 5 弱以上的搖晃，" + fmt(d.n7) + " 處遇過 6 弱以上，" + d.n9 + " 處遇過 7 級。"; } },
+    quakeStop("cwa006", "1906 年梅山地震"),
+    quakeStop("cwa111", "1999 年集集地震"),
+    quakeStop("usgsus7000m9g4", "2024 年花蓮地震"),
+    { title: "最常被搖的文資", tag: "推估，不是官方觀測",
+      prep: function () {
+        var best = null, bn = 0;
+        A.sites.forEach(function (s) {
+          var n = 0;
+          order.forEach(function (k) { var q = V.quakes[k]; if (yearOf(q) >= s.year && +q.levels.charAt(s.i) >= 6) n++; });
+          if (n > bn) { bn = n; best = s; }
+        });
+        return best ? { s: best, n: bn } : null;
+      },
+      apply: function (d) { setView("quake", -1); return { center: [d.s.lng, d.s.lat], zoom: 11 }; },
+      text: function (d) { return A.counties[d.s.county].name + "的「" + esc(d.s.name) + "」" + d.s.year + " 年創建以來，推估有 <b>" + d.n + " 次</b>搖到 5 強以上，是全臺最多的。"; } },
+    { title: "颱風最常經過的地方", tag: "推估，不是官方觀測",
+      prep: function () {
+        var L = A.sites.filter(function (s) { return V.typhoons[s.i][2] >= 65; }), t = {}, mx = 0;
+        L.forEach(function (s) { t[s.county] = (t[s.county] || 0) + 1; });
+        A.sites.forEach(function (s) { if (V.typhoons[s.i][2] > mx) mx = V.typhoons[s.i][2]; });
+        var k = Object.keys(t).sort(function (a, b) { return t[b] - t[a] || a - b; })[0];
+        return { n: L.length, c: A.counties[k].name, cn: t[k], mx: mx };
+      },
+      apply: function () { setView("typhoon", -1); return ISLAND; },
+      text: function (d) { return "有 <b>" + fmt(d.n) + " 處</b>文資，創建以來有 65 個以上達颱風強度的熱帶氣旋中心從 " + V.meta.typhoonKm + " 公里內通過，最多的是" + d.c + "（" + d.cn + " 處）。最多的一處遇過 " + d.mx + " 個。"; } }
+  ];
+  var story = window.Story ? window.Story.create({ layer: "survived", track: "sv", invite: "說說文資挺過的地震和颱風", stops: STORY, ready: function () { return load(); } }) : null;
+
   /* ---------- 面板 ---------- */
   function render() {
     var q = evIdx >= 0 ? V.quakes[evIdx] : null;
@@ -128,8 +179,9 @@
         '<button type="button" data-m="quake" aria-pressed="' + (mode === "quake") + '">地震</button>' +
         '<button type="button" data-m="typhoon" aria-pressed="' + (mode === "typhoon") + '">颱風</button></div>' +
         (mode === "quake" ? '<div class="sv-pick"><button type="button" id="svPrev" aria-label="較早的地震">‹</button><label class="sr-only" for="svSel">選擇地震</label><select id="svSel">' + opts + '</select><button type="button" id="svNext" aria-label="較晚的地震">›</button></div>' : "") +
-        '<span class="sv-tag">全部是推估，不是官方觀測</span></div>' +
+        '<span class="sv-tag">全部是推估，不是官方觀測</span>' + (story ? story.button() : "") + "</div>" +
       '<p class="tl-cap sv-cap">' + cap + "</p>";
+    if (story) story.mount(A.panel);
     Array.prototype.forEach.call(A.panel.querySelectorAll(".seg button"), function (b) {
       b.onclick = function () { location.hash = "#survived/" + b.dataset.m; };
     });
@@ -211,6 +263,7 @@
         return load().then(function () { if (A.current && A.current.id === "survived") A.current.enter(A, args); })
           .catch(function () { A.panel.innerHTML = '<p class="tl-cap">資料載入失敗，請重新整理。</p>'; });
       }
+      if (story) { story.enter(); if (story.active()) story.stop(); }
       mode = args[0] === "typhoon" ? "typhoon" : "quake";
       evIdx = -1;
       if (mode === "quake" && args[1] && args[1] !== "all") V.quakes.forEach(function (q, k) { if (q.id === args[1]) evIdx = k; });
@@ -218,6 +271,7 @@
       about(); show();
     },
     leave: function () {
+      if (story) story.leave();
       A.map.setLayoutProperty(DOTS, "visibility", "none");
       if (marker) { marker.remove(); marker = null; }
       state = [];          /* 其他圖層會改同一個 feature-state，回來時要全部重設 */

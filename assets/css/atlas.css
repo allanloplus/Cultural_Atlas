@@ -277,3 +277,15 @@ button, input, select { font: inherit; color: inherit; }
   .panel .is-tour { font-size: .86rem; padding-left: 10px; }
   .is-invite { left: 8px; right: 8px; bottom: 8px; border-radius: 16px; font-size: .82rem; }
 }
+
+/* 平面分頁的「Allan 和阿拉蕾說故事」（assets/js/story.js；卡片與對話沿用 3D 文資島的 .is-tour、.is-say） */
+.st-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 2px 13px 2px 4px; border-radius: 999px; border: 1px solid var(--teal); background: var(--card); color: var(--teal); font-weight: 700; font-size: .85rem; cursor: pointer; white-space: nowrap; }
+.st-btn img { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; object-position: top; background: var(--paper-2); }
+.st-btn img + img { margin-left: -11px; }
+.st-btn[aria-pressed="true"] { background: var(--teal); color: var(--teal-ink); }
+.tl-count + .st-btn { margin-left: 0; }
+.sv-tag + .st-btn { margin-left: auto; }
+@media (max-width: 720px) {
+  .tl-head .st-btn { order: 7; }
+  .tl-head .tl-count + .st-btn { order: 4; margin-left: auto; }
+}
